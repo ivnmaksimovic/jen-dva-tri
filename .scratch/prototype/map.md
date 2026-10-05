@@ -57,17 +57,22 @@ Current phase: feel tuning, then push-the-phone (see Roadmap).**
 
 ## Roadmap (what's next)
 
-1. **Feel tuning** (current phase) — dial in Surfaces and car params on the
-   slingshot model; tuning persists per browser (lil-gui → localStorage).
-2. **Push-the-phone** — the user's main-bet control scheme. Full design:
-   ticket 07 (sensor mapping, ~300 ms gesture window, behind-the-car camera
-   alignment in that mode). The HTTPS dev server is already in place.
+1. **Feel tuning** (current phase — USER-held, not an agent task) — the
+   user dials in Surfaces and car params on their phone; tuning persists
+   per browser (lil-gui → localStorage). Agents: physics feel params are
+   the user's domain.
+2. **Push-the-phone** — the user's main-bet control scheme; the next
+   AGENT task: ticket 11 (open) — build it per the settled design in
+   ticket 07. HTTPS dev server already in place.
 3. **Flick** — maybe, much later (ticket 01).
 4. **v1: stop throwing away** — once the controls feel right, grill the
    real game's design (multiplayer rules: car-to-car contact, turn order,
    race start, the penalise mode, Mines; Track Building / track editor;
    car presets) and rebuild on a real architecture. The prototype informs
    the design; it is NOT the seed of the codebase.
+
+"Do the next thing": run the frontier scan (docs/agents/issue-tracker.md)
+→ currently ticket 11 (open).
 
 ## Decisions so far
 

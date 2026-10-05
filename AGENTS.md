@@ -12,6 +12,10 @@ New to the project? Read in order: `README.md` (state + pointers) →
 map record the engineering lessons (physics scale, timestep, rejected
 approaches) — read them before changing physics or controls.
 
+"Do the next thing" = run the frontier scan: `.scratch/*/issues/` for
+open tickets, first by number wins (see `docs/agents/issue-tracker.md`).
+Read the ticket's Gate/Blocked-by lines before starting.
+
 ## Agent skills
 
 ### Issue tracker
