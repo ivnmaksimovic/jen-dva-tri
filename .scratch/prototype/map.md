@@ -19,25 +19,41 @@ Architecture requirements surfaced during grilling:
 - Deliberate no-YAGNI zones: camera experimentation, car presets/licensed
   models, hazard variants.
 
-Build notes (v0 slingshot slice, 2026-10-05):
+Build notes (v0 slingshot slice + feel passes, 2026-10-05):
 
-- Car v1 (4 jointed wheel bodies) REJECTED: at 1:64 scale the solver ratcheted
-  rim-edge contacts into vibration, sideways creep and endless rolling.
-  Car v2: ONE rigid body (chassis box + 4 wheel spheres compound), wheels
-  are visual meshes spun procedurally. Rolling resistance = linearDamping,
-  grip = slideFriction — both live-tunable. ADR-0001 (full 3D physics)
-  intact; per-wheel joints may be revisited only if the game feel demands it.
+- Car v1 (4 jointed wheel bodies) REJECTED: at 1:64 scale the solver
+  ratcheted rim-edge contacts into vibration, sideways creep and endless
+  rolling. Car v2: ONE rigid body (chassis box + 4 wheel spheres compound),
+  wheels are visual meshes spun procedurally. ADR-0001 (full 3D physics)
+  intact; per-wheel joints NOT permanently dismissed (user's call) —
+  revisit only if the game feel demands it.
+- Feel pass 1 (5475802): strikes clamp to the Car's outer frame
+  (clampToFrame: nearest edge point at side height — a finger never strikes
+  the middle); curveFactor interpolates the strike toward center, default
+  1 = OFF (arrow == physics strike point); wheel visuals fixed (axle along
+  local Z, spin about Z); tuning persists per browser (localStorage
+  'jdt-v0-tuning'; testField excluded; GUI has a Reset tuning button).
+- Feel pass 2 (c7fa5e1): distributed Coulomb friction at the FOUR wheel
+  contact points (side grip + rolling resistance; impulses capped by
+  μ·(m/4)·G·dt and limited by each point's effective mass so they never
+  overshoot). Surfaces = grip presets (rubber-on-concrete μ ≈ 0.7–1.0).
+  angularDamping = bearing level (~0.2). Verified: roll decel == μ·G.
 - Physics stability: timestep 1/240 (4 steps/frame) — at 1/60 bodies sink
   g·dt² ≈ 36% of a wheel radius per step and the correction impulse
   launches them (scale-invariant; only the timestep fixes it).
   numSolverIterations = 8.
-- Known limitation: with slideFriction low, cars may slowly slide down the
-  sidewalk ramps when parked (a real car would roll too — acceptable for v0,
-  tune slideFriction if it bothers).
+- LESSON (cost ~1h): persisted user GUI tuning masqueraded as a physics
+  bug (the "2.3× mystery brake" was the user's saved rollFriction).
+  Read localStorage / __jdt params BEFORE theorizing about measurement
+  anomalies.
+- Known limitation: a Car parked HEADING DOWN a sidewalk ramp creeps
+  (forward gravity component beats rollFriction); parked ACROSS the ramp
+  it holds (sideFriction ≫ slope). A real free-rolling car would roll too —
+  acceptable for v0.
 
-**Session state: v0 slingshot slice is BUILT, committed and feel-tuned
-(commits a2d276b → c7fa5e1); feel-pass iterations are in the build notes
-below. Current phase: feel tuning, then push-the-phone (see Roadmap).**
+**Session state: v0 slingshot slice BUILT and feel-tuned through two feel
+passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334).
+Current phase: feel tuning, then push-the-phone (see Roadmap).**
 
 ## Roadmap (what's next)
 
@@ -93,8 +109,11 @@ Round 3 (frontier cleared):
   for thin chalk lines at flick speeds; determinism helps later. (ticket 06)
 - Push-the-phone mapping: screen shows top-down game view; camera in this
   mode rotates to top-down **behind the Car** so phone heading aligns with
-  the Car; local axes = Car axes; `rotationRate` → curve Push; one strike =
-  one impulse; phone displacement ignored; thresholds tuned in Sandbox.
+  the Car; local axes = Car axes; one strike = one Push. REFINEMENT (pre-
+  build): a legal phone-push is a bounded gesture window (~300 ms, tunable)
+  — sensor data is integrated over the window (direction may change within
+  it — the curve Push), not read as one sample. Full details: ticket 07.
+  Phone displacement ignored; thresholds tuned in Sandbox.
   Behind-the-car alignment is push-the-phone only — slingshot mode does
   NOT need or prefer it. (ticket 07)
 - Secure context: HTTPS dev server via `@vitejs/plugin-basic-ssl`; web-first
