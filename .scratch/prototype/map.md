@@ -35,9 +35,23 @@ Build notes (v0 slingshot slice, 2026-10-05):
   sidewalk ramps when parked (a real car would roll too — acceptable for v0,
   tune slideFriction if it bothers).
 
-**Session state: grilling frontier is empty — all ten tickets resolved.
-Awaiting user confirmation of shared understanding, then build begins
-(slingshot vertical slice first).**
+**Session state: v0 slingshot slice is BUILT, committed and feel-tuned
+(commits a2d276b → c7fa5e1); feel-pass iterations are in the build notes
+below. Current phase: feel tuning, then push-the-phone (see Roadmap).**
+
+## Roadmap (what's next)
+
+1. **Feel tuning** (current phase) — dial in Surfaces and car params on the
+   slingshot model; tuning persists per browser (lil-gui → localStorage).
+2. **Push-the-phone** — the user's main-bet control scheme. Full design:
+   ticket 07 (sensor mapping, ~300 ms gesture window, behind-the-car camera
+   alignment in that mode). The HTTPS dev server is already in place.
+3. **Flick** — maybe, much later (ticket 01).
+4. **v1: stop throwing away** — once the controls feel right, grill the
+   real game's design (multiplayer rules: car-to-car contact, turn order,
+   race start, the penalise mode, Mines; Track Building / track editor;
+   car presets) and rebuild on a real architecture. The prototype informs
+   the design; it is NOT the seed of the codebase.
 
 ## Decisions so far
 

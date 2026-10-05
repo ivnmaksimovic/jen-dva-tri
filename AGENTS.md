@@ -4,6 +4,14 @@ A 3D game built with TypeScript, Three.js and Vite, packaged for mobile with
 Capacitor. Android (Play Store) is the first target. See `README.md` for
 architecture and commands.
 
+## Finding the current work
+
+New to the project? Read in order: `README.md` (state + pointers) →
+`GLOSSARY.md` (the game's language) → the newest `.scratch/*/map.md`
+(active effort: decisions so far, open fog, roadmap). Build notes in each
+map record the engineering lessons (physics scale, timestep, rejected
+approaches) — read them before changing physics or controls.
+
 ## Agent skills
 
 ### Issue tracker

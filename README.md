@@ -1,30 +1,45 @@
 # Jen Dva Tri
 
-A 3D game built with TypeScript, Three.js and Vite, packaged for mobile
-stores with Capacitor. **Android (Play Store) is the first target**;
-iOS can follow from the same codebase.
+A 3D game built with TypeScript, Three.js, Rapier (physics) and Vite,
+packaged for mobile stores with Capacitor. **Android (Play Store) is the
+first target**; iOS can follow from the same codebase.
 
-## Architecture
+The game is a digital adaptation of a folk game ("1-2-3"): turn-based
+finger-push racing with 1:64 model cars on chalk-drawn tracks, played on
+real terrain. The game's language lives in `GLOSSARY.md`.
 
-```
-src/
-  main.ts          Web entry point — boots the Game
-  game/
-    Game.ts        Engine wrapper: renderer, scene, camera, main loop, resize
-    demo.ts        Placeholder scene (spinning, draggable icosahedron) — replace me
-android/           Native Android shell (Capacitor), committed to git
-ios/               Native iOS shell (Capacitor), committed to git
-dist/              Web build output — what Capacitor loads into the WebView
-```
+## Current state — v0 throwaway controls prototype
 
-The engine (`Game.ts`) is decoupled from content: modules register
-per-frame updaters and input handlers against the running game.
+`src/game/proto/` is a **throwaway prototype** for the controls experiments
+(slingshot scheme): full 3D physics, one runtime-tunable car, a chalk loop
+track with a raised sidewalk section, the game rules (Out of Track, Rock,
+Lake, Bridge, 3-Push Turns), Sandbox + Lap Challenge modes, a speckled
+test field, and a live tuning panel (persists per browser in localStorage).
+It will be **replaced wholesale** once the controls feel right — do not
+grow the real game out of it.
+
+Active effort: `.scratch/prototype/map.md` — decisions, open fog, roadmap.
+**Next up: the push-the-phone control scheme** (phone on a surface, pushed
+like the car; motion sensors capture the Push) — full design in
+`.scratch/prototype/issues/07-phone-push-mapping.md`.
+
+## Where things live
+
+| Path | What |
+|---|---|
+| `GLOSSARY.md` | The game's settled language |
+| `docs/adr/` | Recorded hard-to-reverse decisions (0001: full 3D physics) |
+| `.scratch/<effort>/` | Design maps + tickets (see `docs/agents/issue-tracker.md`) |
+| `src/game/Game.ts` | Engine wrapper: renderer, scene, camera, loop |
+| `src/game/proto/` | v0 throwaway prototype (world, track, car, slingshot, rules, hud) |
+| `android/`, `ios/` | Native Capacitor shells (committed to git) |
+| `dist/` | Web build output — what Capacitor loads into the WebView |
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `pnpm dev` | Dev server with hot reload (open on your LAN IP to test on a phone) |
+| `pnpm dev` | **HTTPS** dev server (self-signed cert; LAN host so you can test on a phone — motion sensors require a secure context) |
 | `pnpm build` | Type-check + production web build into `dist/` |
 | `pnpm android` | Web build → sync to `android/` → open in Android Studio |
 | `pnpm ios` | Web build → sync to `ios/` → open in Xcode |
@@ -46,3 +61,4 @@ per-frame updaters and input handlers against the running game.
 
 - Mobile performance: device pixel ratio is clamped to 2 in `Game.ts`; keep an eye on draw calls and texture sizes as the game grows.
 - `appId: com.jendvatri.game` is a placeholder — do **not** publish with it.
+- Physics scale: 1 world unit = 10 real cm; Rapier steps at 1/240 s (4 steps/frame) — see `.scratch/prototype/map.md` build notes for why.
