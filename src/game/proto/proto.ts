@@ -56,7 +56,7 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Car + rules + HUD ---
   let carParams: CarParams = { ...CAR_PRESETS[1] };
-  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5, curveFactor: 0.35 };
+  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5, curveFactor: 1.0 };
   const camParams = { height: 5.2, back: 1.8, follow: 5 };
 
   // Persist tuning across reloads (per browser). testField is NOT persisted.
@@ -114,13 +114,34 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Tuning panel ---
   const gui = new GUI({ title: 'v0 prototype' });
+
+  // Surfaces: presets of the grip values (sideFriction/rollFriction are the
+  // Surface — the distributed wheel friction makes them feel physical).
+  const SURFACES = {
+    'Rough concrete': { rollFriction: 0.05, sideFriction: 1.0, angularDamping: 0.3 },
+    'Smooth concrete': { rollFriction: 0.03, sideFriction: 0.7, angularDamping: 0.2 },
+    'Paved sidewalk': { rollFriction: 0.04, sideFriction: 0.8, angularDamping: 0.25 },
+    'Tiled balcony': { rollFriction: 0.02, sideFriction: 0.4, angularDamping: 0.12 },
+    'Ice (raw strikes)': { rollFriction: 0.005, sideFriction: 0.08, angularDamping: 0.03 },
+  } as const;
+  gui
+    .add({ surface: 'Smooth concrete' }, 'surface', Object.keys(SURFACES))
+    .onChange((name: string) => {
+      Object.assign(carParams, SURFACES[name as keyof typeof SURFACES]);
+      rebuildCar();
+      persist();
+      for (const c of carFolder.children) {
+        if ('updateDisplay' in c) c.updateDisplay();
+      }
+    });
+
   const carFolder = gui.addFolder('Car (rebuilds)');
   carFolder.add(carParams, 'mass', 0.3, 4, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
   carFolder.add(carParams, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
   carFolder.add(carParams, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
   carFolder.add(carParams, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'sideFriction', 0.05, 1.0, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'angularDamping', 0.2, 5, 0.1).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'sideFriction', 0.05, 1.5, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'angularDamping', 0, 2, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
   gui
     .add({ preset: CAR_PRESETS[1].name }, 'preset', CAR_PRESETS.map((p) => p.name))
     .onChange((name: string) => {
@@ -161,12 +182,29 @@ export async function createProtoScene(game: Game): Promise<void> {
   camFolder.add(camParams, 'height', 2, 14, 0.1).onFinishChange(persist);
   camFolder.add(camParams, 'back', 0, 8, 0.1).onFinishChange(persist);
 
+  gui
+    .add({ resetTuning: () => {
+      localStorage.removeItem(STORE_KEY);
+      location.reload();
+    } }, 'resetTuning')
+    .name('Reset tuning');
+
   function rebuildCar(): void {
     const pos = car.position;
     const quat = car.quaternion;
     car.dispose();
     car = new Car(world, scene, carParams);
     car.resetPose(pos, quat); // rebuild in place (tuning mid-race is fine)
+  }
+
+  /** Debug/tuning hook: patch car params and rebuild in place. */
+  function setCarParams(patch: Partial<CarParams>): void {
+    Object.assign(carParams, patch);
+    rebuildCar();
+    persist();
+    for (const c of carFolder.children) {
+      if ('updateDisplay' in c) c.updateDisplay();
+    }
   }
 
   // --- Main loop: physics, sync, rules, camera ---
@@ -198,5 +236,6 @@ export async function createProtoScene(game: Game): Promise<void> {
     rules,
     camera: game.camera,
     setTestField,
+    setCarParams,
   };
 }

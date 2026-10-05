@@ -34,9 +34,10 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 0.8,
     wheelRadius: 0.06,
     wheelHalfWidth: 0.025,
-    rollFriction: 0.05,
-    sideFriction: 0.5,
-    angularDamping: 2.6,
+    // Friction here = surface defaults (smooth concrete); pick a Surface.
+    rollFriction: 0.03,
+    sideFriction: 0.35,
+    angularDamping: 0.2,
   },
   {
     name: 'Balanced (medium)',
@@ -44,9 +45,9 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 1.3,
     wheelRadius: 0.075,
     wheelHalfWidth: 0.03,
-    rollFriction: 0.04,
-    sideFriction: 0.4,
-    angularDamping: 2.0,
+    rollFriction: 0.03,
+    sideFriction: 0.35,
+    angularDamping: 0.2,
   },
   {
     name: 'Metal (big wheels, heavy)',
@@ -54,9 +55,9 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 2.4,
     wheelRadius: 0.1,
     wheelHalfWidth: 0.035,
-    rollFriction: 0.025,
-    sideFriction: 0.3,
-    angularDamping: 1.5,
+    rollFriction: 0.03,
+    sideFriction: 0.35,
+    angularDamping: 0.2,
   },
 ];
 
@@ -193,42 +194,76 @@ export class Car {
   }
 
   /**
-   * Anisotropic rolling friction: along the heading the wheels ROLL
-   * (rollFriction·G decel — a long glide), sideways the tires GRIP
-   * (sideFriction·G decel — a short skid). Constant deceleration, so rolls
-   * end definitively (no exponential never-quite-stops tail). Vertical
-   * velocity is untouched (gravity, bounces). Also snaps near-zero velocities
-   * to zero and spins the visual wheels from forward speed.
+   * Distributed tire friction: Coulomb side-grip and rolling resistance
+   * applied at the FOUR WHEEL contact points. This is what makes a struck
+   * Car pivot around its far wheels instead of its center — the surface grips
+   * the tires that aren't sliding — and what makes Surfaces feel different:
+   * sideFriction/rollFriction ARE the Surface. Replaces whole-body velocity
+   * shaping (v1 of the feel model).
+   */
+  private applyWheelFriction(dt: number): void {
+    if (dt <= 0) return;
+    const m = this.chassis.mass();
+    if (m <= 0) return;
+
+    const v = this.chassis.linvel();
+    const w = this.chassis.angvel();
+    const vel = new THREE.Vector3(v.x, v.y, v.z);
+    const ang = new THREE.Vector3(w.x, w.y, w.z);
+    const q = this.quaternion;
+    const qInv = q.clone().invert();
+    const t = this.chassis.translation();
+    const center = new THREE.Vector3(t.x, t.y, t.z);
+
+    // Chassis-box inertias (body-frame approximation, diagonal).
+    const lx = CHASSIS_HALF.x * 2;
+    const ly = CHASSIS_HALF.y * 2;
+    const lz = CHASSIS_HALF.z * 2;
+    const Ix = (m * (ly * ly + lz * lz)) / 12;
+    const Iy = (m * (lx * lx + lz * lz)) / 12;
+    const Iz = (m * (lx * lx + ly * ly)) / 12;
+
+    // Coulomb cap per wheel: μ · (m·G/4) · dt
+    const capSide = this.params.sideFriction * GRAVITY * (m / 4) * dt;
+    const capRoll = this.params.rollFriction * GRAVITY * (m / 4) * dt;
+
+    for (const local of this.wheelLocal) {
+      const p = center.clone().add(local.clone().applyQuaternion(q));
+      const r = p.clone().sub(center);
+      const vp = vel.clone().add(ang.clone().cross(r));
+
+      for (const [dir, cap] of [
+        [new THREE.Vector3(0, 0, 1).applyQuaternion(q), capSide], // side grip
+        [new THREE.Vector3(1, 0, 0).applyQuaternion(q), capRoll], // roll resistance
+      ] as const) {
+        const vAlong = vp.dot(dir);
+        if (Math.abs(vAlong) < 1e-4) continue;
+        // Effective mass along `dir` at this point: 1/(1/m + τ·I⁻¹·τ),
+        // τ = r×dir in the body frame (undershoot-safe: never overshoots).
+        const tl = r.clone().cross(dir).applyQuaternion(qInv);
+        const invEff =
+          1 / m + (tl.x * tl.x) / Ix + (tl.y * tl.y) / Iy + (tl.z * tl.z) / Iz;
+        const eff = 1 / invEff;
+        const j = Math.min(Math.abs(vAlong) * eff, cap);
+        const imp = dir.clone().multiplyScalar(-Math.sign(vAlong) * j);
+        this.chassis.applyImpulseAtPoint(imp, p, true);
+      }
+    }
+  }
+
+  /**
+   * Per-frame: wheel friction (the feel), then near-zero snap (kills the
+   * residual tail + solver creep), then visuals. Wheels spin from forward
+   * speed (visual only). Vertical velocity is untouched.
    */
   sync(dt: number): void {
-    const v = this.chassis.linvel();
-    const vel = new THREE.Vector3(v.x, v.y, v.z);
-    const q = this.quaternion;
-    const fwd = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
-    const side = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
-    const up = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
-    let vf = vel.dot(fwd);
-    let vs = vel.dot(side);
-    const vu = vel.dot(up);
-    const df = this.params.rollFriction * GRAVITY * dt;
-    const ds = this.params.sideFriction * GRAVITY * dt;
-    vf = Math.abs(vf) <= df ? 0 : vf - Math.sign(vf) * df;
-    vs = Math.abs(vs) <= ds ? 0 : vs - Math.sign(vs) * ds;
+    this.applyWheelFriction(dt);
 
+    const v = this.chassis.linvel();
     const w = this.chassis.angvel();
-    const speed = Math.hypot(vf, vs, vu);
-    const spinRate = Math.hypot(w.x, w.y, w.z);
-    if (speed < 0.08 && spinRate < 0.15) {
-      // Fully at rest: zero everything (kills residual solver creep).
+    if (Math.hypot(v.x, v.y, v.z) < 0.08 && Math.hypot(w.x, w.y, w.z) < 0.15) {
       this.chassis.setLinvel({ x: 0, y: 0, z: 0 }, true);
       this.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
-    } else {
-      const out = fwd
-        .clone()
-        .multiplyScalar(vf)
-        .add(side.clone().multiplyScalar(vs))
-        .add(up.clone().multiplyScalar(vu));
-      this.chassis.setLinvel({ x: out.x, y: out.y, z: out.z }, true);
     }
 
     const t = this.chassis.translation();
@@ -236,6 +271,8 @@ export class Car {
     this.group.position.set(t.x, t.y, t.z);
     this.group.quaternion.set(r.x, r.y, r.z, r.w);
 
+    const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(this.group.quaternion);
+    const vf = v.x * forward.x + v.y * forward.y + v.z * forward.z;
     const spin = (vf / this.params.wheelRadius) * dt;
     for (const mesh of this.wheelMeshes) mesh.rotation.z -= spin;
   }
