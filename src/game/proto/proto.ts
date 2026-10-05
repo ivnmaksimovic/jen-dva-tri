@@ -56,6 +56,32 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Car + rules + HUD ---
   let carParams: CarParams = { ...CAR_PRESETS[1] };
+  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5, curveFactor: 0.35 };
+  const camParams = { height: 5.2, back: 1.8, follow: 5 };
+
+  // Persist tuning across reloads (per browser). testField is NOT persisted.
+  const STORE_KEY = 'jdt-v0-tuning';
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as {
+      carParams?: Partial<CarParams>;
+      pushParams?: Partial<PushParams>;
+      camParams?: { height?: number; back?: number };
+    } | null;
+    if (saved) {
+      Object.assign(carParams, saved.carParams ?? {});
+      Object.assign(pushParams, saved.pushParams ?? {});
+      Object.assign(camParams, saved.camParams ?? {});
+    }
+  } catch {
+    /* fresh start */
+  }
+  function persist(): void {
+    localStorage.setItem(
+      STORE_KEY,
+      JSON.stringify({ carParams, pushParams, camParams }),
+    );
+  }
+
   let car = new Car(world, scene, carParams);
 
   function placeAtStart(): void {
@@ -73,7 +99,6 @@ export async function createProtoScene(game: Game): Promise<void> {
   const rules = new Rules(track, () => car, hud);
   rulesRef.rules = rules;
 
-  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5, curveFactor: 0.35 };
   setupSlingshot(
     game,
     () => car,
@@ -84,19 +109,18 @@ export async function createProtoScene(game: Game): Promise<void> {
   );
 
   // --- Camera: follows the Car, fixed heading, near top-down ---
-  const camParams = { height: 5.2, back: 1.8, follow: 5 };
   const camTarget = new THREE.Vector3();
   game.camera.position.set(track.pointAt(START_S).x, camParams.height, 2);
 
   // --- Tuning panel ---
   const gui = new GUI({ title: 'v0 prototype' });
   const carFolder = gui.addFolder('Car (rebuilds)');
-  carFolder.add(carParams, 'mass', 0.3, 4, 0.05).onFinishChange(rebuildCar);
-  carFolder.add(carParams, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(rebuildCar);
-  carFolder.add(carParams, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(rebuildCar);
-  carFolder.add(carParams, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(rebuildCar);
-  carFolder.add(carParams, 'sideFriction', 0.05, 1.0, 0.05).onFinishChange(rebuildCar);
-  carFolder.add(carParams, 'angularDamping', 0.2, 5, 0.1).onFinishChange(rebuildCar);
+  carFolder.add(carParams, 'mass', 0.3, 4, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'sideFriction', 0.05, 1.0, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
+  carFolder.add(carParams, 'angularDamping', 0.2, 5, 0.1).onFinishChange(() => { rebuildCar(); persist(); });
   gui
     .add({ preset: CAR_PRESETS[1].name }, 'preset', CAR_PRESETS.map((p) => p.name))
     .onChange((name: string) => {
@@ -104,14 +128,15 @@ export async function createProtoScene(game: Game): Promise<void> {
       if (!preset) return;
       carParams = { ...preset };
       rebuildCar();
+      persist();
       for (const c of carFolder.children) {
         if ('updateDisplay' in c) c.updateDisplay();
       }
     });
   const pushFolder = gui.addFolder('Push');
-  pushFolder.add(pushParams, 'impulseScale', 0.5, 12, 0.1);
-  pushFolder.add(pushParams, 'maxDrag', 0.5, 5, 0.1);
-  pushFolder.add(pushParams, 'curveFactor', 0, 1, 0.05);
+  pushFolder.add(pushParams, 'impulseScale', 0.5, 12, 0.1).onFinishChange(persist);
+  pushFolder.add(pushParams, 'maxDrag', 0.5, 5, 0.1).onFinishChange(persist);
+  pushFolder.add(pushParams, 'curveFactor', 0, 1, 0.05).onFinishChange(persist);
 
   // --- Test field: bare speckled concrete, no chalk, no rules ---
   const fieldState = { testField: false };
@@ -133,8 +158,8 @@ export async function createProtoScene(game: Game): Promise<void> {
   gui.add(fieldState, 'testField').onChange(setTestField);
 
   const camFolder = gui.addFolder('Camera');
-  camFolder.add(camParams, 'height', 2, 14, 0.1);
-  camFolder.add(camParams, 'back', 0, 8, 0.1);
+  camFolder.add(camParams, 'height', 2, 14, 0.1).onFinishChange(persist);
+  camFolder.add(camParams, 'back', 0, 8, 0.1).onFinishChange(persist);
 
   function rebuildCar(): void {
     const pos = car.position;
@@ -171,6 +196,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     world,
     track,
     rules,
+    camera: game.camera,
     setTestField,
   };
 }

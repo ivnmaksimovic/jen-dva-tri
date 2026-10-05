@@ -120,7 +120,7 @@ export class Car {
         this.wheelLocal.push(local);
 
         const geom = new THREE.CylinderGeometry(r, r, params.wheelHalfWidth * 2, 14);
-        geom.rotateZ(Math.PI / 2); // axle along local X
+        geom.rotateX(Math.PI / 2); // axle along local Z (left-right) — Car drives +X
         const mesh = new THREE.Mesh(
           geom,
           new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.9 }),
@@ -237,7 +237,37 @@ export class Car {
     this.group.quaternion.set(r.x, r.y, r.z, r.w);
 
     const spin = (vf / this.params.wheelRadius) * dt;
-    for (const mesh of this.wheelMeshes) mesh.rotation.x += spin;
+    for (const mesh of this.wheelMeshes) mesh.rotation.z -= spin;
+  }
+
+  /**
+   * Nearest point on the Car's outer frame (chassis rectangle outline), at
+   * side-strike height. A finger can only strike the frame — drags that
+   * start in the middle snap to the nearest edge, and that is the strike the
+   * physics respects.
+   */
+  clampToFrame(worldPoint: THREE.Vector3): THREE.Vector3 {
+    const c = this.position;
+    const q = this.quaternion;
+    // Accept Vector3 or plain {x,y,z} (tests/debug pass plain objects).
+    const local = new THREE.Vector3(worldPoint.x, worldPoint.y, worldPoint.z)
+      .sub(c)
+      .applyQuaternion(q.clone().invert());
+    const hx = CHASSIS_HALF.x;
+    const hz = CHASSIS_HALF.z;
+    if (Math.abs(local.x) <= hx && Math.abs(local.z) <= hz) {
+      // Inside the frame: snap to the nearest edge.
+      const dx = hx - Math.abs(local.x);
+      const dz = hz - Math.abs(local.z);
+      if (dx < dz) local.x = local.x >= 0 ? hx : -hx;
+      else local.z = local.z >= 0 ? hz : -hz;
+    } else {
+      // Outside: clamp onto the outline.
+      local.x = Math.max(-hx, Math.min(hx, local.x));
+      local.z = Math.max(-hz, Math.min(hz, local.z));
+    }
+    local.y = 0;
+    return local.applyQuaternion(q).add(c).setY(c.y);
   }
 
   dispose(): void {

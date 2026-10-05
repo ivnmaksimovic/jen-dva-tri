@@ -83,7 +83,8 @@ export function setupSlingshot(
     const g = groundPoint(e);
     if (!g) return;
     dragging = true;
-    contact = hit;
+    // A finger strikes the outer frame, never the middle — clamp the hit.
+    contact = car.clampToFrame(hit);
     start = g;
     try {
       el.setPointerCapture(e.pointerId);
