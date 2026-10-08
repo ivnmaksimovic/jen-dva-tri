@@ -56,7 +56,7 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Car + rules + HUD ---
   let carParams: CarParams = { ...CAR_PRESETS[1] };
-  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5, curveFactor: 1.0 };
+  const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5 };
   const camParams = { height: 5.2, back: 1.8, follow: 5 };
 
   // Persist tuning across reloads (per browser). testField is NOT persisted.
@@ -157,7 +157,6 @@ export async function createProtoScene(game: Game): Promise<void> {
   const pushFolder = gui.addFolder('Push');
   pushFolder.add(pushParams, 'impulseScale', 0.5, 12, 0.1).onFinishChange(persist);
   pushFolder.add(pushParams, 'maxDrag', 0.5, 5, 0.1).onFinishChange(persist);
-  pushFolder.add(pushParams, 'curveFactor', 0, 1, 0.05).onFinishChange(persist);
 
   // --- Test field: bare speckled concrete, no chalk, no rules ---
   const fieldState = { testField: false };

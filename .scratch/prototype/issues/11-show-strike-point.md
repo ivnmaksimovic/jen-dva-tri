@@ -53,9 +53,16 @@ change and no new dependency.
 **Structural guarantee for "no change to the Push":** one function,
 `strikePoint()`, computes the point the impulse lands at; the marker is drawn
 at its result and `applyImpulseAtPoint` receives its result. They cannot drift
-apart. Per your call it returns the *effective* point (the frame strike pulled
-toward the centre by `curveFactor`), not the raw frame contact — so the
-marker doubles as a tuning readout for that knob. It re-evaluates every frame
+apart.
+
+**Superseded 2026-10-08:** at your call this originally returned the
+*effective* point (the frame strike pulled toward the centre by
+`curveFactor`), so the marker doubled as a readout for that knob.
+`curveFactor` has since been REMOVED — it was authored torque pretending to
+be physics, and it forced exceptions everywhere downstream (see ticket 15).
+`strikePoint()` now returns the frame contact itself, which is what the marker
+has always shown to be honest. Everything above still holds; the
+`curveFactor: 0.5` measurement below is the only part that no longer applies. It re-evaluates every frame
 while aiming, since a Car parked on a slope can creep mid-drag.
 
 No GUI controls added (hardcoded size/colour) per your call.
