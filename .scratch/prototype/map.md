@@ -33,14 +33,32 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   1 = OFF (arrow == physics strike point); wheel visuals fixed (axle along
   local Z, spin about Z); tuning persists per browser (localStorage
   'jdt-v0-tuning'; testField excluded; GUI has a Reset tuning button).
+- curveFactor REMOVED (2026-10-08, user's call): it interpolated the strike
+  point toward the Car centre to tame the curve Push. Wrong kind of thing —
+  declaring torque to come from where the finger did NOT land is authored
+  behaviour, not simulation, which is exactly what ADR-0001 rejects. It
+  defaulted to 1 (OFF), so removing it changed nothing about play; what it did
+  cost was exceptions: the strike marker could not be drawn where the point
+  actually was (ticket 11), and the no-pull rule had to be asked against a
+  different point than the visible one (ticket 15). Curve already falls out of
+  roll vs side friction. NOTE: the strike is now raw, so aim accuracy matters
+  more — if it ever feels brutally curvy again, fix how taps map onto the
+  frame (clampToFrame), not by moving where the impulse is said to land.
+- Ticket 15 (no pulling, 2026-10-08): a Push must go INTO the Car — a bent
+  index finger presses, it cannot grip, so pulling is impossible
+  (`Car.pushesFrom`: step 2 mm along the strike and you must be inside the
+  chassis footprint; wheels excluded, they stick out past it). Legal
+  directions form a clean 180° half-plane off every face, backwards strikes
+  included. A rejected swing applies NO impulse and spends NO Push, and the
+  aim arrow turns red while it is still gesture-time, so the rule is visible
+  before release rather than discovered by nothing happening.
 - Ticket 11 (strike point, 2026-10-08): aiming now reads through ONE overlay
   drawn over the Car — a bullseye sprite at the exact strike point + the aim
   arrow, both `transparent` + depthTest/depthWrite off with renderOrder
   (marker 20 > arrow 10) so the overlay pass draws them last. Both are fed by
   a single `strikePoint()` in `slingshot.ts`, which is also what
   `applyImpulseAtPoint` receives — the visible point CANNOT drift from the
-  physics point. Marker shows on touch-down (before any drag). It follows the
-  effective (curveFactor-interpolated) point, not the raw frame contact.
+  physics point. Marker shows on touch-down (before any drag).
   NOTE for later: a strike on the FAR frame edge is genuinely occluded by the
   roof at the default camera (camera ~19° off vertical; the sight line exits
   through the top face) — verified by pixel readback, not assumed.

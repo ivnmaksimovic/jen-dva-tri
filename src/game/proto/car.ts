@@ -64,6 +64,8 @@ export const CAR_PRESETS: CarParams[] = [
 const WHEEL_X = 0.15; // wheelbase 0.3 (3 cm real)
 const WHEEL_Z = 0.11; // track width 0.22
 const CHASSIS_HALF = { x: 0.225, y: 0.05, z: 0.1 }; // 4.5 cm long, 2 cm wide
+/** How far into the Car a strike must bite to count as a Push: 2 mm real. */
+const PUSH_BITE = 0.02;
 const CHASSIS_LIFT = 0.035; // body origin above wheel axles
 
 const ENV_GROUP = 0x0001;
@@ -305,6 +307,30 @@ export class Car {
     }
     local.y = 0;
     return local.applyQuaternion(q).add(c).setY(c.y);
+  }
+
+  /**
+   * Does a strike landing at `framePoint` and travelling along `direction`
+   * actually PUSH? A bent index finger can press but cannot grip, so there is
+   * no such thing as pulling a Car (GLOSSARY: Push = a strike against the
+   * Car). The strike line has to go INTO the body: stepping `PUSH_BITE` along
+   * it from the frame point must land inside the chassis footprint. If it does
+   * not, the finger swung past the Car and NOTHING happened — no impulse, and
+   * no Push spent.
+   *
+   * Tested against the chassis footprint only, never the wheels: they stick
+   * out past it (WHEEL_Z + r), and a finger skating over a wheel has not
+   * struck the frame.
+   */
+  pushesFrom(framePoint: THREE.Vector3, direction: THREE.Vector3): boolean {
+    const qInv = this.quaternion.clone().invert();
+    const local = new THREE.Vector3(framePoint.x, framePoint.y, framePoint.z)
+      .sub(this.position)
+      .applyQuaternion(qInv);
+    const dir = direction.clone().setY(0).normalize().applyQuaternion(qInv);
+    const x = local.x + dir.x * PUSH_BITE;
+    const z = local.z + dir.z * PUSH_BITE;
+    return Math.abs(x) < CHASSIS_HALF.x && Math.abs(z) < CHASSIS_HALF.z;
   }
 
   dispose(): void {

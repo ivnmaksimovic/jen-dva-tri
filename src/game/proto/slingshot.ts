@@ -27,6 +27,14 @@ const ARROW_ORDER = 10;
 const MARKER_ORDER = 20;
 
 /**
+ * Aim arrow colours: a strike that bites into the Car vs one that would be a
+ * pull (impossible with a finger). The rejection has to be visible BEFORE the
+ * release, or it reads as a broken control rather than as physics.
+ */
+const AIM_OK_COLOR = 0xffffff;
+const AIM_PULL_COLOR = 0xff4d4d;
+
+/**
  * Bullseye texture for the strike marker: dark rim, bright ring, dark centre
  * pip. The rim is what makes it readable against chalk, concrete and any Car
  * colour outdoors; the pip marks the exact spot (the ring only helps you find
@@ -59,9 +67,6 @@ function strikeMarkerTexture(): THREE.CanvasTexture {
 export interface PushParams {
   impulseScale: number;
   maxDrag: number;
-  /** Scales the strike's off-center offset → curve torque. 1 = raw physics
-   * (brutally sensitive on a 4.5 cm car), 0 = always dead-center. */
-  curveFactor: number;
 }
 
 export function setupSlingshot(
@@ -140,18 +145,29 @@ export function setupSlingshot(
   }
 
   /**
-   * The exact point the Push will be applied at: the frame strike, pulled
-   * toward the centre by curveFactor. ONE source of truth — the marker is
-   * drawn here and the impulse lands here, so what you see is what gets
-   * struck. At curveFactor 1 (default) this IS the frame contact.
+   * Is this gesture a Push at all? A finger presses, it cannot grip: the
+   * strike line has to go INTO the Car (ticket 15). Asked where the finger
+   * lands — exactly the point drawn.
+   */
+  function aimIsPush(dir: THREE.Vector3): boolean {
+    return getCar().pushesFrom(contact, dir);
+  }
+
+  /**
+   * The exact point the Push will be applied at: where the finger strikes the
+   * frame, at side height. ONE source of truth — the marker is drawn here and
+   * the impulse lands here, so what you see is what gets struck.
+   *
+   * A `curveFactor` used to live here, pulling the strike toward the centre to
+   * tame the curve on a 4.5 cm Car. Removed 2026-10-08: declaring the torque
+   * to come from somewhere the finger did not touch is authored behaviour, not
+   * simulation, and it forced exceptions downstream — the marker could not sit
+   * where it was drawn, and the no-pull rule had to be asked against a
+   * different point than the visible one. Curve comes from roll vs side
+   * friction instead.
    */
   function strikePoint(): THREE.Vector3 {
-    const c = getCar().position;
-    return new THREE.Vector3(
-      c.x + (contact.x - c.x) * params.curveFactor,
-      c.y,
-      c.z + (contact.z - c.z) * params.curveFactor,
-    );
+    return new THREE.Vector3(contact.x, getCar().position.y, contact.z);
   }
 
   // Tracks the Car every frame while aiming: a Car parked on a slope can creep
@@ -192,6 +208,7 @@ export function setupSlingshot(
     // and can lift and re-strike instead of committing blind.
     marker.position.copy(strikePoint());
     marker.visible = true;
+    arrow.setColor(AIM_OK_COLOR);
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
@@ -213,6 +230,9 @@ export function setupSlingshot(
     arrow.position.copy(strikePoint());
     arrow.setDirection(dir);
     arrow.setLength(Math.max(len, 0.08), 0.12, 0.07);
+    // Red = this gesture could not be a Push (the strike line misses the
+    // body) — say so while there is still time to change it.
+    arrow.setColor(aimIsPush(dir) ? AIM_OK_COLOR : AIM_PULL_COLOR);
     arrow.visible = true;
   });
 
@@ -227,11 +247,16 @@ export function setupSlingshot(
       .clone()
       .setY(0)
       .setLength(Math.min(len, params.maxDrag) * params.impulseScale);
-    // Strike at the Car's side height (a finger strikes the side, not the
-    // roof). The horizontal contact offset is the curve Push torque — scaled
-    // by curveFactor because a 4.5 cm car makes raw offsets brutally curvy
-    // (even a "center" tap from a tilted camera strikes ~2 mm off).
-    // Same function the marker is drawn at: no way for the two to disagree.
+    // A finger presses, it cannot grip: the strike line has to go into the
+    // Car. Swinging past it is not a Push — no impulse, and no Push spent
+    // (you waved in the air, you did not move your Car).
+    if (!aimIsPush(impulse)) {
+      onRefused('A finger can only press — strike into the Car');
+      return;
+    }
+    // Strike at the Car's side height and exactly where the finger landed:
+    // the offset from the centre IS the curve Push torque, raw. Same function
+    // the marker is drawn at — no way for the two to disagree.
     getCar().chassis.applyImpulseAtPoint(impulse, strikePoint(), true);
     onPush();
   }
