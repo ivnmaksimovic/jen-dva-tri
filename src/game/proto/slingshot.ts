@@ -8,7 +8,53 @@ import type { Car } from './car.js';
  * direction → release to Push. Drag length = strength. The off-center contact
  * point provides torque (a crude curve Push — the refined gesture-window
  * version comes with push-the-phone, see ticket 07).
+ *
+ * Aiming reads through ONE overlay (ticket 11): a bullseye on the exact point
+ * the Push will strike + the direction/strength arrow, both drawn on top of
+ * the Car. Nothing here touches the Push physics.
  */
+
+/**
+ * Bullseye diameter in world units (1 unit = 10 cm): ~1.3 cm on a 4.5 cm Car.
+ * Hardcoded on purpose — the read is legible or it is not; there is nothing
+ * here for the player to tune. Sprites are world-sized, so it stays put on the
+ * Car and shrinks with it as the camera pulls back.
+ */
+const MARKER_SIZE = 0.13;
+/** Both read over the Car body (depth off). Marker above arrow: at the tail
+ * they overlap, and the point is the read that must win. */
+const ARROW_ORDER = 10;
+const MARKER_ORDER = 20;
+
+/**
+ * Bullseye texture for the strike marker: dark rim, bright ring, dark centre
+ * pip. The rim is what makes it readable against chalk, concrete and any Car
+ * colour outdoors; the pip marks the exact spot (the ring only helps you find
+ * it).
+ */
+function strikeMarkerTexture(): THREE.CanvasTexture {
+  const s = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = s;
+  canvas.height = s;
+  const ctx = canvas.getContext('2d')!;
+  const c = s / 2;
+  ctx.beginPath();
+  ctx.arc(c, c, c - 2, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(12,12,12,0.92)';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(c, c, c - 12, 0, Math.PI * 2);
+  ctx.fillStyle = '#ffffff';
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(c, c, c * 0.26, 0, Math.PI * 2);
+  ctx.fillStyle = '#141414';
+  ctx.fill();
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
 
 export interface PushParams {
   impulseScale: number;
@@ -38,8 +84,40 @@ export function setupSlingshot(
     0.12,
     0.07,
   );
+  // The aim read must never be swallowed by the Car it grows out of: draw it
+  // last (renderOrder) and ignore depth — the gesture is a UI read, not a
+  // thing in the world. transparent puts both parts in the overlay pass.
+  arrow.line.renderOrder = ARROW_ORDER;
+  arrow.cone.renderOrder = ARROW_ORDER;
+  // ArrowHelper types its materials loosely (Material | Material[]); both are
+  // single basic materials in practice.
+  const shaftMat = arrow.line.material as THREE.LineBasicMaterial;
+  const headMat = arrow.cone.material as THREE.MeshBasicMaterial;
+  shaftMat.transparent = true;
+  shaftMat.depthTest = false;
+  shaftMat.depthWrite = false;
+  headMat.transparent = true;
+  headMat.depthTest = false;
+  headMat.depthWrite = false;
   arrow.visible = false;
   game.scene.add(arrow);
+
+  // The strike point itself: a bullseye at the exact spot the finger will
+  // land. It existed before (the frame-clamped contact) but was invisible —
+  // buried in the silhouette of a 1 cm-tall body.
+  const marker = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      map: strikeMarkerTexture(),
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+    }),
+  );
+  marker.scale.setScalar(MARKER_SIZE);
+  marker.renderOrder = MARKER_ORDER;
+  marker.visible = false;
+  game.scene.add(marker);
 
   let dragging = false;
   let contact = new THREE.Vector3();
@@ -60,6 +138,29 @@ export function setupSlingshot(
     const out = new THREE.Vector3();
     return raycaster.ray.intersectPlane(plane, out) ? out : null;
   }
+
+  /**
+   * The exact point the Push will be applied at: the frame strike, pulled
+   * toward the centre by curveFactor. ONE source of truth — the marker is
+   * drawn here and the impulse lands here, so what you see is what gets
+   * struck. At curveFactor 1 (default) this IS the frame contact.
+   */
+  function strikePoint(): THREE.Vector3 {
+    const c = getCar().position;
+    return new THREE.Vector3(
+      c.x + (contact.x - c.x) * params.curveFactor,
+      c.y,
+      c.z + (contact.z - c.z) * params.curveFactor,
+    );
+  }
+
+  // Tracks the Car every frame while aiming: a Car parked on a slope can creep
+  // mid-drag, and the marker must stay on the point the release will strike.
+  game.onUpdate(() => {
+    if (!dragging) return;
+    marker.position.copy(strikePoint());
+    marker.visible = true;
+  });
 
   function carHit(e: PointerEvent): THREE.Vector3 | null {
     toNDC(e);
@@ -86,6 +187,11 @@ export function setupSlingshot(
     // A finger strikes the outer frame, never the middle — clamp the hit.
     contact = car.clampToFrame(hit);
     start = g;
+    // Show the strike point on touch-down, before any drag: the player must
+    // see where they caught the frame while deciding the push direction —
+    // and can lift and re-strike instead of committing blind.
+    marker.position.copy(strikePoint());
+    marker.visible = true;
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
@@ -104,7 +210,7 @@ export function setupSlingshot(
       return;
     }
     const dir = dragVec.clone().setY(0).normalize();
-    arrow.position.copy(contact);
+    arrow.position.copy(strikePoint());
     arrow.setDirection(dir);
     arrow.setLength(Math.max(len, 0.08), 0.12, 0.07);
     arrow.visible = true;
@@ -114,9 +220,9 @@ export function setupSlingshot(
     if (!dragging) return;
     dragging = false;
     arrow.visible = false;
+    marker.visible = false;
     const len = dragVec.length();
     if (len < 0.12) return; // treat as a tap: no Push
-    const car = getCar();
     const impulse = dragVec
       .clone()
       .setY(0)
@@ -125,13 +231,8 @@ export function setupSlingshot(
     // roof). The horizontal contact offset is the curve Push torque — scaled
     // by curveFactor because a 4.5 cm car makes raw offsets brutally curvy
     // (even a "center" tap from a tilted camera strikes ~2 mm off).
-    const c = car.position;
-    const strike = {
-      x: c.x + (contact.x - c.x) * params.curveFactor,
-      y: c.y,
-      z: c.z + (contact.z - c.z) * params.curveFactor,
-    };
-    car.chassis.applyImpulseAtPoint(impulse, strike, true);
+    // Same function the marker is drawn at: no way for the two to disagree.
+    getCar().chassis.applyImpulseAtPoint(impulse, strikePoint(), true);
     onPush();
   }
 
@@ -139,5 +240,6 @@ export function setupSlingshot(
   el.addEventListener('pointercancel', () => {
     dragging = false;
     arrow.visible = false;
+    marker.visible = false;
   });
 }

@@ -19,8 +19,14 @@ It will be **replaced wholesale** once the controls feel right — do not
 grow the real game out of it.
 
 Active effort: `.scratch/prototype/map.md` — decisions, open fog, roadmap.
+Open prototype experiments before anything else: readable strike point (11),
+multiple Cars (12), surfaces and roughness (14) — see the map's Roadmap.
+The v1 (real game) roadmap is parked at `.scratch/v1/spec.md` (coarse: only
+verdict + two grilling tickets + the core prefactor are ticketed).
+**Physical world note:** grip is f(tire, Surface) resolved per wheel contact —
+see ADR-0002.
 **Next up: the push-the-phone control scheme** (phone on a surface, pushed
-like the car; motion sensors capture the Push) — full design in
+like the car; motion sensors capture the Push — ticket 13) — full design in
 `.scratch/prototype/issues/07-phone-push-mapping.md`.
 
 ## Where things live
@@ -30,6 +36,7 @@ like the car; motion sensors capture the Push) — full design in
 | `GLOSSARY.md` | The game's settled language |
 | `docs/adr/` | Recorded hard-to-reverse decisions (0001: full 3D physics) |
 | `.scratch/<effort>/` | Design maps + tickets (see `docs/agents/issue-tracker.md`) |
+| `.scratch/v1/spec.md` | Parked v1 roadmap + tickets (`.scratch/v1/issues/`) |
 | `src/game/Game.ts` | Engine wrapper: renderer, scene, camera, loop |
 | `src/game/proto/` | v0 throwaway prototype (world, track, car, slingshot, rules, hud) |
 | `android/`, `ios/` | Native Capacitor shells (committed to git) |
