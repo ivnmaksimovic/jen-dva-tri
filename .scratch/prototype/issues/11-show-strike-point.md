@@ -30,11 +30,10 @@ restyling the rest of the HUD.
 - [x] Aiming still shows direction and strength clearly at the same time (the
       point is a new read, not a replacement for the arrow)
 - [x] Readable on the target phone outdoors — **closed by the user 2026-10-08:**
-      "I can easily see the marker on the phone." The fallback option (b) from
-      the design round — a marker hovering above the roof with depth left
-      honest — is therefore NOT needed; the through-the-Car draw reads fine in
-      real hands. Only direct sunlight is untested; re-open if you lose it
-      outdoors.
+      "I can easily see the marker on the phone… Marker is good and visible."
+      Every criterion of this ticket is met. The fallback option (b) from the
+      design round — a marker hovering above the roof with depth left honest —
+      is NOT needed and NOT wanted.
 - [x] No change to the Push itself: identical aim produces identical motion
       before and after
 
@@ -90,12 +89,12 @@ No GUI controls added (hardcoded size/colour) per your call.
   Car. After `pointercancel` the region is pixel-identical to baseline (0
   changed pixels) — the overlay hides cleanly on release.
 
-**Open (not for an agent):** the outdoor phone pass. Watch specifically for
-(a) whether 1.3 cm reads against sunlit concrete — if not, raise
-`MARKER_SIZE` in `slingshot.ts`; (b) whether the dark rim is enough to keep it
-looking *seated on the frame* rather than floating. Option (b) from the design
-round — a marker hovering above the roof, with depth left honest — is still
-unbuilt and is the fallback if the through-the-Car draw reads oddly in play.
+**Fully closed 2026-10-08 by the user on the device:** the marker is visible
+and good, both concerns resolved — the 1.3 cm size reads, and the dark rim
+keeps it seated on the frame rather than floating. Nothing here is open. The
+hovering-marker fallback (option (b) from the design round) is NOT built and
+NOT wanted: if the read ever regresses, the fix is inside this approach (raise
+`MARKER_SIZE` in `slingshot.ts`), not a different one.
 
 ## Comments
 

@@ -52,7 +52,8 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
 - **VERDICT (2026-10-08, user): the strike marker is legible on the phone**
   ("I can easily see the marker on the phone"). Ticket 11's fallback — a
   marker hovering above the roof with depth left honest — is DROPPED, not
-  parked. Only direct sunlight remains untested.
+  parked. Size and contrast both confirmed good on the device — nothing left
+  open here.
 - Ticket 15 (no pulling, 2026-10-08): a Push must go INTO the Car — a bent
   index finger presses, it cannot grip, so pulling is impossible
   (`Car.pushesFrom`: step 0.1 mm along the strike and you must be inside the
