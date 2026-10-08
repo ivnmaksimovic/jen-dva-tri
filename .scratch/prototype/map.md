@@ -33,6 +33,21 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   1 = OFF (arrow == physics strike point); wheel visuals fixed (axle along
   local Z, spin about Z); tuning persists per browser (localStorage
   'jdt-v0-tuning'; testField excluded; GUI has a Reset tuning button).
+- Ticket 11 (strike point, 2026-10-08): aiming now reads through ONE overlay
+  drawn over the Car — a bullseye sprite at the exact strike point + the aim
+  arrow, both `transparent` + depthTest/depthWrite off with renderOrder
+  (marker 20 > arrow 10) so the overlay pass draws them last. Both are fed by
+  a single `strikePoint()` in `slingshot.ts`, which is also what
+  `applyImpulseAtPoint` receives — the visible point CANNOT drift from the
+  physics point. Marker shows on touch-down (before any drag). It follows the
+  effective (curveFactor-interpolated) point, not the raw frame contact.
+  NOTE for later: a strike on the FAR frame edge is genuinely occluded by the
+  roof at the default camera (camera ~19° off vertical; the sight line exits
+  through the top face) — verified by pixel readback, not assumed.
+- VERIFICATION TECHNIQUE (reusable, no screenshot needed): read pixels with
+  `gl.readPixels` from the existing WebGL canvas (`canvas.getContext('webgl2')`
+  returns the live context), diff two frames, and print an ASCII map of the
+  changed region. Beats eyeballing screenshots and is deterministic.
 - Feel pass 2 (c7fa5e1): distributed Coulomb friction at the FOUR wheel
   contact points (side grip + rolling resistance; impulses capped by
   μ·(m/4)·G·dt and limited by each point's effective mass so they never
@@ -50,10 +65,40 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   (forward gravity component beats rollFriction); parked ACROSS the ramp
   it holds (sideFriction ≫ slope). A real free-rolling car would roll too —
   acceptable for v0.
+- **FINDING (2026-10-06, user): grip is not a property of the Car.** v0 keeps
+  sideFriction/rollFriction/angularDamping on `CarParams` — one set per Car,
+  global for the whole run. Wrong shape: grip is a property of the **contact**
+  (Surface × tire), and a single Track crosses surfaces (tiled balcony →
+  concrete path → sidewalk), so each wheel can sit on a different Surface at
+  the same time. Consequence for v1: friction must be resolved per wheel from
+  what is under it, not read from the Car. Recorded as ADR-0002.
+- **AGREED (2026-10-06, user): a side Push on a very sticky Surface may make a
+  Car roll over. Do NOT spend effort making that happen — run honest physics
+  and it will emerge. No authored roll/tumble behaviour, ever: it is a target
+  of the simulation, not a feature to implement.
+- **Curve Push (slingshot): do not invest further.** Current play is fine, and
+  usable curve already falls out of roll vs side friction. The gesture-window
+  refinement stays push-the-phone work (ticket 07); nothing needed here for
+  now.
+- **Friction mechanism (as built, feel pass 2):** all Car colliders set
+  friction 0 with combine rule Min — Rapier contact friction never grips the
+  Car. Grip is hand-rolled: for each of the 4 wheel points, its contact
+  velocity `v + ω × ρ`, then a side-grip impulse (along local Z) and a roll
+  resistance impulse (along local X), each capped at μ·(m/4)·G·dt and limited
+  by the point's effective mass `1/(1/m + τ·I⁻¹·τ)`. Note what this means:
+  **four contact points sampled on ONE body, not four tyres** — there is no
+  tyre-vs-ground distinction anywhere, and the point is sampled whether or not
+  the wheel is loaded or even airborne. See ADR-0002 for where this must go.
 
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
 passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334).
 Current phase: feel tuning, then push-the-phone (see Roadmap).**
+
+User verdict 2026-10-06: **the prototype still does not feel great** — but it
+may be a matter of settings rather than model. So: the model is not yet
+proven wrong; never change feel constants"by judgment" — the user owns the
+numbers, and any unexplained feel change should be checked against the saved
+tuning before being treated as physics (see the tuning LESSON above).
 
 ## Roadmap (what's next)
 
@@ -61,9 +106,25 @@ Current phase: feel tuning, then push-the-phone (see Roadmap).**
    user dials in Surfaces and car params on their phone; tuning persists
    per browser (lil-gui → localStorage). Agents: physics feel params are
    the user's domain.
-2. **Push-the-phone** — the user's main-bet control scheme; the next
-   AGENT task: ticket 11 (open) — build it per the settled design in
-   ticket 07. HTTPS dev server already in place.
+2. **Push-the-phone** — the user's main-bet control scheme: ticket 13 (open)
+   — build it per the settled design in ticket 07. HTTPS dev server already
+   in place.
+
+   **But first: more experiments.** The user wants these in the prototype
+   before push-the-phone (all open, unblocked, user-relevant):
+
+   - ticket 11 — **show where the strike lands** (the aim arrow ran through
+     the middle of the Car, hiding the one thing aiming must show) — BUILT
+   - ticket 12 — **multiple Cars** (two Cars have never touched; every 1:64
+     solver problem so far showed up where small bodies meet at rest, and
+     multiplayer depends on the answer)
+   - ticket 14 — **surfaces along a Track + roughness** (spatial grip per
+     ADR-0002, plus the open bet: does bumpy/bad concrete that small wheels
+     feel earn its complexity, or do we drop it?)
+
+   Ordering note: these sit *after* 11 by number and 11 is done, so the
+   frontier scan now picks 12. Say the word if they should jump ahead of
+   push-the-phone.
 3. **Flick** — maybe, much later (ticket 01).
 4. **v1: stop throwing away** — once the controls feel right, grill the
    real game's design (multiplayer rules: car-to-car contact, turn order,
@@ -72,7 +133,7 @@ Current phase: feel tuning, then push-the-phone (see Roadmap).**
    the design; it is NOT the seed of the codebase.
 
 "Do the next thing": run the frontier scan (docs/agents/issue-tracker.md)
-→ currently ticket 11 (open).
+→ currently ticket 12 (open): multiple Cars.
 
 ## Decisions so far
 
