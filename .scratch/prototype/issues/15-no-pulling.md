@@ -40,9 +40,14 @@ Non-goal: changing Push strength or any other feel number.
   out past the chassis (WHEEL_Z + r ≈ 0.185 vs 0.1), so pulling outward from a
   side would "hit" a wheel and wrongly count. A finger skating over a wheel has
   not struck the frame.
-- **"Goes into the Car" = stepping 2 mm along the strike line lands strictly
+- **"Goes into the Car" = stepping 0.1 mm along the strike line lands strictly
   inside the footprint** (`Car.pushesFrom`). A line parallel to the frame lands
   ON the outline and so is a skid, not a Push.
+- `PUSH_BITE` (that 0.1 mm) is a probe, not a feel number: it exists because the
+  strike sits ON the outline where inside/outside are undefined. Sized against
+  the only thing it could disagree with — asking at distance zero — i.e. how
+  close to a corner the strike can be before the step leaves the footprint
+  sideways. Was 2 mm (10% of the Car's width); lowered 2026-10-08.
 - **Glancing strikes are left alone** (unresolved by design): a line that
   skims into the body still delivers the full impulse, where a real finger would
   skid off and deliver almost nothing. Scaling impulse by how square the strike

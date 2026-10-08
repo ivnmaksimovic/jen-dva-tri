@@ -65,16 +65,20 @@ const WHEEL_X = 0.15; // wheelbase 0.3 (3 cm real)
 const WHEEL_Z = 0.11; // track width 0.22
 const CHASSIS_HALF = { x: 0.225, y: 0.05, z: 0.1 }; // 4.5 cm long, 2 cm wide
 /**
- * Probe distance for "does this strike go into the Car?": 2 mm real.
+ * Probe distance for "does this strike go into the Car?": 0.1 mm real.
  * Not a gameplay or feel setting — the strike point sits exactly ON the frame
  * outline, where "inside" and "outside" are both undefined, so the question
- * can only be asked a short step along the strike. At 2 mm it decides nothing
- * but the degenerate case (a drag exactly parallel to the frame, which skids
- * along without biting); any direction that presses inward at all is already
- * legal. Order: too large would start rejecting genuine strikes near the
- * corners, since the probe could leave the footprint sideways.
+ * can only be asked a short step along the strike.
+ *
+ * Sized against the ONLY thing it can disagree with: asking at distance zero.
+ * It disagrees when the step walks past a corner and leaves the footprint
+ * sideways, which needs the strike to be within PUSH_BITE of a corner and
+ * moving nearly parallel to it. The Car is 20 mm wide, so 0.1 mm is 0.5% of
+ * its width — that window is essentially unreachable by a finger, while still
+ * ~13 orders of magnitude above float noise here. Any direction that presses
+ * inward at all stays legal; only an exactly parallel drag still skids off.
  */
-const PUSH_BITE = 0.02;
+const PUSH_BITE = 0.001;
 const CHASSIS_LIFT = 0.035; // body origin above wheel axles
 
 const ENV_GROUP = 0x0001;
