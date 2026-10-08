@@ -44,6 +44,15 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   roll vs side friction. NOTE: the strike is now raw, so aim accuracy matters
   more — if it ever feels brutally curvy again, fix how taps map onto the
   frame (clampToFrame), not by moving where the impulse is said to land.
+- **VERDICT (2026-10-08, user): glancing strikes keep the FULL impulse.** We
+  know that is not what a real finger does (it skids off). Left that way on
+  purpose — revisit only if it turns into a gameplay exploit, i.e. if someone
+  farms a decent shove out of a barely-touching graze. Do not "fix" it as
+  realism before then.
+- **VERDICT (2026-10-08, user): the strike marker is legible on the phone**
+  ("I can easily see the marker on the phone"). Ticket 11's fallback — a
+  marker hovering above the roof with depth left honest — is DROPPED, not
+  parked. Only direct sunlight remains untested.
 - Ticket 15 (no pulling, 2026-10-08): a Push must go INTO the Car — a bent
   index finger presses, it cannot grip, so pulling is impossible
   (`Car.pushesFrom`: step 2 mm along the strike and you must be inside the
@@ -132,7 +141,8 @@ tuning before being treated as physics (see the tuning LESSON above).
    before push-the-phone (all open, unblocked, user-relevant):
 
    - ticket 11 — **show where the strike lands** (the aim arrow ran through
-     the middle of the Car, hiding the one thing aiming must show) — BUILT
+     the middle of the Car, hiding the one thing aiming must show) — BUILT and
+     confirmed legible on the phone; the hovering-marker fallback is dropped
    - ticket 12 — **multiple Cars** (two Cars have never touched; every 1:64
      solver problem so far showed up where small bodies meet at rest, and
      multiplayer depends on the answer)

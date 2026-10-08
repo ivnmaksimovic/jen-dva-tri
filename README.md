@@ -19,8 +19,9 @@ It will be **replaced wholesale** once the controls feel right — do not
 grow the real game out of it.
 
 Active effort: `.scratch/prototype/map.md` — decisions, open fog, roadmap.
-Open prototype experiments before anything else: readable strike point (11),
-multiple Cars (12), surfaces and roughness (14) — see the map's Roadmap.
+Open prototype experiments before anything else: multiple Cars (12), surfaces
+and roughness (14) — see the map's Roadmap. Readable strike point (11) is done
+and legible on the phone.
 The v1 (real game) roadmap is parked at `.scratch/v1/spec.md` (coarse: only
 verdict + two grilling tickets + the core prefactor are ticketed).
 **Physical world note:** grip is f(tire, Surface) resolved per wheel contact —

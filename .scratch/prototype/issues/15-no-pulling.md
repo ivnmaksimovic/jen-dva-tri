@@ -82,9 +82,12 @@ Legitimate strikes are untouched: `Car.pushesFrom` sampled 24 directions off
 all four faces and accepts exactly a **180° half-plane** at each — every
 strike that presses inward counts, including backwards off the nose.
 
-**Still open (feel, yours):** glancing strikes that barely bite still deliver
-the full impulse, where a real finger would skid off. Whether to scale the
-impulse by how square the strike lands is a feel number, not an agent call.
+**Verdict 2026-10-08 (user): glancing strikes deliver the full impulse, full
+stop.** Left deliberately unrealistic — a real finger would skid off and
+deliver almost nothing. Recorded as a possible gameplay exploit to revisit
+LATER, not now: if players ever farm a shove out of a barely-touching graze,
+that is the moment to look at it. No code change; the behaviour of today is
+the intended behaviour.
 
 ## Comments
 

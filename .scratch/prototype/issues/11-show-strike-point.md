@@ -29,8 +29,12 @@ restyling the rest of the HUD.
       no longer reads as starting from the middle of the Car
 - [x] Aiming still shows direction and strength clearly at the same time (the
       point is a new read, not a replacement for the arrow)
-- [ ] Readable on the target phone outdoors — **open, yours to close:** verified
-      on desktop only (see Answer → how it was measured)
+- [x] Readable on the target phone outdoors — **closed by the user 2026-10-08:**
+      "I can easily see the marker on the phone." The fallback option (b) from
+      the design round — a marker hovering above the roof with depth left
+      honest — is therefore NOT needed; the through-the-Car draw reads fine in
+      real hands. Only direct sunlight is untested; re-open if you lose it
+      outdoors.
 - [x] No change to the Push itself: identical aim produces identical motion
       before and after
 
