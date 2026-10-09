@@ -117,10 +117,49 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   **four contact points sampled on ONE body, not four tyres** — there is no
   tyre-vs-ground distinction anywhere, and the point is sampled whether or not
   the wheel is loaded or even airborne. See ADR-0002 for where this must go.
+- Ticket 12 (multiple Cars, 2026-10-09): **several Cars behave — after a real
+  fix to the single-body Car.** Before it, a three-Car chain left the struck Car
+  in a frame-locked limit cycle (angular velocity ±0.44 rad/s flipping sign
+  EVERY frame, creeping 0.5 mm/s, `atRest()` never true → **that Car could never
+  be Pushed again**). One Car never triggered it, which is why it was never
+  seen. Three things in `Car.applyWheelFriction`, each found by measuring:
+  1. all 8 impulses were computed from ONE stale velocity read; the four wheels
+     are one rigid body, so every impulse changes what the next one is measured
+     against → they overshot several-fold and FLIPPED the residual. Now read
+     fresh inside the relaxation loop.
+  2. the Coulomb cap was per IMPULSE, so every extra relaxation sweep spent the
+     grip budget again (same strike: 149 cm on 1 sweep, 28 cm on 6). Now one
+     **frame budget** μ·m·G·dt per direction, shared by the four wheels.
+  3. one Gauss-Seidel pass is ORDER-BIASED: it turned a dead-centre Push into
+     an 8°/667 mm systematic curve — invented behaviour, the same sin
+     `curveFactor` was removed for. Now **4 alternating sweeps** (forward,
+     backward, …), so a symmetric input gives a symmetric result.
+  Straight-line feel measured IDENTICAL before/after (149.0 cm roll at impulse
+  8; 0.7 mm drift; 0° turn), so nothing needs re-tuning — but re-feel it on the
+  phone anyway. Guarded by `pnpm check:cars` (check 6: centre stays <2° and
+  <20 mm, corner strike still turns >15°, measured 68.6°).
+- HEADLESS-CHECK TECHNIQUE (added 2026-10-09, reusable): prototype TS runs in
+  Node through Vite's SSR pipeline — `scripts/headless-check.mjs` loads any
+  module exporting `run()`, so a check imports the REAL `Car`, the real world
+  settings and even the real no-pull rule (see
+  `src/game/proto/checks/multi-car.ts`). Two traps learned the hard way: Cars
+  that are not placed still spawn at the origin and overlap whatever you are
+  testing (create only the Cars you place), and sampling every 30th frame
+  ALIASES a frame-rate limit cycle into looking rock steady — always print
+  consecutive frames before believing a constant.
+- Several Cars (ticket 12): the **aimed Car is the one you TOUCH** (one raycast
+  over all Cars), and there is ONE selection concept — touch, GUI selector,
+  camera, HUD Turn counter and tuning panel all move together, so the panel can
+  never be editing a Car you are not pushing. A **Turn belongs to a Car** (each
+  Car has its own Pushes / lap progress in `Rules`), matching one owner = one
+  Car. Car-to-car contact needed NO new physics: only the collision FILTER had
+  to gain `CAR_GROUP` — Cars previously passed straight through each other.
 
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
-passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334).
-Current phase: feel tuning, then push-the-phone (see Roadmap).**
+passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), now
+running several Cars on the Track (ticket 12, RESOLVED 2026-10-09).
+Current phase: feel tuning with several Cars, then push-the-phone
+(see Roadmap).**
 
 User verdict 2026-10-06: **the prototype still does not feel great** — but it
 may be a matter of settings rather than model. So: the model is not yet
@@ -144,16 +183,16 @@ tuning before being treated as physics (see the tuning LESSON above).
    - ticket 11 — **show where the strike lands** (the aim arrow ran through
      the middle of the Car, hiding the one thing aiming must show) — BUILT and
      confirmed legible on the phone; the hovering-marker fallback is dropped
-   - ticket 12 — **multiple Cars** (two Cars have never touched; every 1:64
-     solver problem so far showed up where small bodies meet at rest, and
-     multiplayer depends on the answer)
+   - ticket 12 — **multiple Cars** — RESOLVED 2026-10-09: several Cars behave
+     once the wheel-friction bugs above were fixed, and that fix is the
+     ticket's real output. Remaining (user's): phone check of frame pacing and
+     of reading three Cars at arm's length
    - ticket 14 — **surfaces along a Track + roughness** (spatial grip per
      ADR-0002, plus the open bet: does bumpy/bad concrete that small wheels
      feel earn its complexity, or do we drop it?)
 
-   Ordering note: these sit *after* 11 by number and 11 is done, so the
-   frontier scan now picks 12. Say the word if they should jump ahead of
-   push-the-phone.
+   Ordering note: 11 and 12 are done, so the frontier scan now picks 14
+   (surfaces + roughness). Say the word if push-the-phone should jump ahead.
 3. **Flick** — maybe, much later (ticket 01).
 4. **v1: stop throwing away** — once the controls feel right, grill the
    real game's design (multiplayer rules: car-to-car contact, turn order,
@@ -162,7 +201,7 @@ tuning before being treated as physics (see the tuning LESSON above).
    the design; it is NOT the seed of the codebase.
 
 "Do the next thing": run the frontier scan (docs/agents/issue-tracker.md)
-→ currently ticket 12 (open): multiple Cars.
+→ currently ticket 14 (open): surfaces along a Track + roughness.
 
 ## Decisions so far
 

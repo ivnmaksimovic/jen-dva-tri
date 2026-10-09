@@ -11,17 +11,20 @@ real terrain. The game's language lives in `GLOSSARY.md`.
 ## Current state — v0 throwaway controls prototype
 
 `src/game/proto/` is a **throwaway prototype** for the controls experiments
-(slingshot scheme): full 3D physics, one runtime-tunable car, a chalk loop
+(slingshot scheme): full 3D physics, **three Cars** on the Track at once (each
+runtime-tunable — pick which one with the `Tune Car` selector), a chalk loop
 track with a raised sidewalk section, the game rules (Out of Track, Rock,
-Lake, Bridge, 3-Push Turns), Sandbox + Lap Challenge modes, a speckled
-test field, and a live tuning panel (persists per browser in localStorage).
+Lake, Bridge, 3-Push Turns — one Turn per Car), Sandbox + Lap Challenge modes,
+a speckled test field, and a live tuning panel (persists per browser in
+localStorage, one set of params per Car).
 It will be **replaced wholesale** once the controls feel right — do not
 grow the real game out of it.
 
 Active effort: `.scratch/prototype/map.md` — decisions, open fog, roadmap.
-Open prototype experiments before anything else: multiple Cars (12), surfaces
-and roughness (14) — see the map's Roadmap. Readable strike point (11) is done
-and legible on the phone.
+Multiple Cars (12) is done — several 1:64 bodies behave once two bugs in the
+hand-rolled wheel friction were fixed (see the map's build notes). Open
+prototype experiment before anything else: surfaces and roughness (14) — see
+the map's Roadmap. Readable strike point (11) is done and legible on the phone.
 The v1 (real game) roadmap is parked at `.scratch/v1/spec.md` (coarse: only
 verdict + two grilling tickets + the core prefactor are ticketed).
 **Physical world note:** grip is f(tire, Surface) resolved per wheel contact —
@@ -40,6 +43,7 @@ like the car; motion sensors capture the Push — ticket 13) — full design in
 | `.scratch/v1/spec.md` | Parked v1 roadmap + tickets (`.scratch/v1/issues/`) |
 | `src/game/Game.ts` | Engine wrapper: renderer, scene, camera, loop |
 | `src/game/proto/` | v0 throwaway prototype (world, track, car, slingshot, rules, hud) |
+| `src/game/proto/checks/` | Headless physics checks (prototype TS run through Vite in Node) |
 | `android/`, `ios/` | Native Capacitor shells (committed to git) |
 | `dist/` | Web build output — what Capacitor loads into the WebView |
 
@@ -49,6 +53,7 @@ like the car; motion sensors capture the Push — ticket 13) — full design in
 |---|---|
 | `pnpm dev` | **HTTPS** dev server (self-signed cert; LAN host so you can test on a phone — motion sensors require a secure context) |
 | `pnpm build` | Type-check + production web build into `dist/` |
+| `pnpm check:cars` | Headless physics check (Node): do several Cars rest, transfer and settle? See `src/game/proto/checks/multi-car.ts` |
 | `pnpm android` | Web build → sync to `android/` → open in Android Studio |
 | `pnpm ios` | Web build → sync to `ios/` → open in Xcode |
 
