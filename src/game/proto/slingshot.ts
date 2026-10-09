@@ -9,6 +9,9 @@ import type { Car } from './car.js';
  * point provides torque (a crude curve Push — the refined gesture-window
  * version comes with push-the-phone, see ticket 07).
  *
+ * With several Cars on the Track (ticket 12) the Car you TOUCH is the Car you
+ * Push — no separate selection step that could disagree with the aim.
+ *
  * Aiming reads through ONE overlay (ticket 11): a bullseye on the exact point
  * the Push will strike + the direction/strength arrow, both drawn on top of
  * the Car. Nothing here touches the Push physics.
@@ -71,7 +74,11 @@ export interface PushParams {
 
 export function setupSlingshot(
   game: Game,
+  /** The Car currently being aimed at — which Car that is can change. */
   getCar: () => Car,
+  /** Every Car on the Track: which one you TOUCH is which one you Push. */
+  getCars: () => Car[],
+  onPick: (car: Car) => void,
   params: PushParams,
   onPush: () => void,
   onRefused: (reason: string) => void,
@@ -178,30 +185,46 @@ export function setupSlingshot(
     marker.visible = true;
   });
 
-  function carHit(e: PointerEvent): THREE.Vector3 | null {
+  /**
+   * Which Car did the finger land on, and where. Raycast against EVERY Car:
+   * with several Cars on the Track, the one under the finger is the one being
+   * aimed at — there is no separate "select" step to get wrong.
+   */
+  function carHit(e: PointerEvent): { car: Car; point: THREE.Vector3 } | null {
     toNDC(e);
     raycaster.setFromCamera(ndc, game.camera);
-    const hits = raycaster.intersectObjects(getCar().group.children, true);
-    return hits.length > 0 ? hits[0].point.clone() : null;
+    let best: { car: Car; point: THREE.Vector3 } | null = null;
+    let bestDist = Infinity;
+    for (const car of getCars()) {
+      const hits = raycaster.intersectObjects(car.group.children, true);
+      if (hits.length > 0 && hits[0].distance < bestDist) {
+        bestDist = hits[0].distance;
+        best = { car, point: hits[0].point.clone() };
+      }
+    }
+    return best;
   }
 
   el.addEventListener('pointerdown', (e) => {
+    const hit = carHit(e);
+    if (!hit) return; // touched bare ground — nothing to aim at
+    // The touched Car becomes the aimed one (camera, Turn budget and the
+    // tuning panel all follow it).
+    onPick(hit.car);
     const car = getCar();
     if (!car.atRest()) {
-      onRefused('The Car must be at rest before the next Push');
+      onRefused(`${car.params.name} must be at rest before the next Push`);
       return;
     }
     if (!canPush()) {
-      onRefused('Turn over — press Next Turn (Lap Challenge)');
+      onRefused(`Turn over — ${car.params.name} is out of Pushes (Next Turn)`);
       return;
     }
-    const hit = carHit(e);
-    if (!hit) return;
     const g = groundPoint(e);
     if (!g) return;
     dragging = true;
     // A finger strikes the outer frame, never the middle — clamp the hit.
-    contact = car.clampToFrame(hit);
+    contact = car.clampToFrame(hit.point);
     start = g;
     // Show the strike point on touch-down, before any drag: the player must
     // see where they caught the frame while deciding the push direction —

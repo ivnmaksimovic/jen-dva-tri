@@ -80,10 +80,56 @@ const CHASSIS_HALF = { x: 0.225, y: 0.05, z: 0.1 }; // 4.5 cm long, 2 cm wide
  */
 const PUSH_BITE = 0.001;
 const CHASSIS_LIFT = 0.035; // body origin above wheel axles
+/**
+ * Sweeps of the wheel-friction relaxation per frame (alternating direction —
+ * see applyWheelFriction). More sweeps = closer to solving all four points
+ * together; measured cost is negligible next to the draw calls.
+ */
+const SWEEPS = 4;
 
 const ENV_GROUP = 0x0001;
 const CAR_GROUP = 0x0002;
 const groups = (membership: number, filter: number) => (membership << 16) | filter;
+/**
+ * A Car collides with the environment AND with other Cars. Before ticket 12
+ * the filter was ENV_GROUP only, so two Cars passed straight through each
+ * other; car-to-car contact is plain physics (pushing another Car is legal,
+ * settled in grilling round 2), so it has to be on.
+ */
+const CAR_FILTER = ENV_GROUP | CAR_GROUP;
+
+/**
+ * The Cars that start on the Track for the multi-Car experiments (ticket 12).
+ * Two twins — same numbers, different colour — and one that differs in mass,
+ * wheel size and grip, so "whose Car is whose" is answerable at a glance and
+ * every read during play says which Car it came from.
+ *
+ * NOTE on rollFriction/sideFriction: they live on CarParams here, but they are
+ * really properties of the contact (Tire × Surface) — see ADR-0002. The third
+ * Car carries its own numbers anyway, because the question ticket 12 asks is
+ * whether several DIFFERENT bodies behave; per-surface grip (ticket 14) will
+ * move these off the Car later.
+ */
+export const STARTING_GRID: CarParams[] = [
+  { ...CAR_PRESETS[0], name: 'Red', color: 0xd94f4f },
+  { ...CAR_PRESETS[0], name: 'Blue', color: 0x3f6fe0 },
+  {
+    ...CAR_PRESETS[2],
+    name: 'Green (heavy)',
+    color: 0x3fbf6a,
+    rollFriction: 0.06,
+    sideFriction: 0.55,
+    angularDamping: 0.45,
+  },
+];
+
+/**
+ * Half-width of the widest thing on the Car — the wheels stick out past the
+ * chassis footprint. Used wherever clearance between two Cars matters.
+ */
+export function carHalfWidth(params: CarParams): number {
+  return WHEEL_Z + params.wheelRadius;
+}
 
 export class Car {
   readonly group = new THREE.Group();
@@ -115,7 +161,7 @@ export class Car {
         // resistance is the manual anisotropic shaping in sync().
         .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
         .setRestitution(0)
-        .setCollisionGroups(groups(CAR_GROUP, ENV_GROUP)),
+        .setCollisionGroups(groups(CAR_GROUP, CAR_FILTER)),
       this.chassis,
     );
 
@@ -130,7 +176,7 @@ export class Car {
             .setFriction(0)
             .setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min)
             .setRestitution(0)
-            .setCollisionGroups(groups(CAR_GROUP, ENV_GROUP)),
+            .setCollisionGroups(groups(CAR_GROUP, CAR_FILTER)),
           this.chassis,
         );
         this.wheelLocal.push(local);
@@ -221,10 +267,6 @@ export class Car {
     const m = this.chassis.mass();
     if (m <= 0) return;
 
-    const v = this.chassis.linvel();
-    const w = this.chassis.angvel();
-    const vel = new THREE.Vector3(v.x, v.y, v.z);
-    const ang = new THREE.Vector3(w.x, w.y, w.z);
     const q = this.quaternion;
     const qInv = q.clone().invert();
     const t = this.chassis.translation();
@@ -238,31 +280,73 @@ export class Car {
     const Iy = (m * (lx * lx + lz * lz)) / 12;
     const Iz = (m * (lx * lx + ly * ly)) / 12;
 
-    // Coulomb cap per wheel: μ · (m·G/4) · dt
-    const capSide = this.params.sideFriction * GRAVITY * (m / 4) * dt;
-    const capRoll = this.params.rollFriction * GRAVITY * (m / 4) * dt;
+    // Coulomb budget for the WHOLE frame, shared by the four wheels:
+    // μ · m · G · dt per direction. It has to be a frame budget, not a
+    // per-impulse cap: every extra relaxation sweep would otherwise spend the
+    // budget again, so iterating N times braked N times as hard (a strike that
+    // rolled 149 cm on one sweep rolled 28 cm on six — same tyres, budget
+    // spent six times). Sharing one budget also lets a locking wheel take more
+    // than its share, which is what a real contact does.
+    const budget = {
+      side: this.params.sideFriction * GRAVITY * m * dt,
+      roll: this.params.rollFriction * GRAVITY * m * dt,
+    };
 
-    for (const local of this.wheelLocal) {
+    const wheelPoints = this.wheelLocal.map((local) => {
       const p = center.clone().add(local.clone().applyQuaternion(q));
-      const r = p.clone().sub(center);
-      const vp = vel.clone().add(ang.clone().cross(r));
+      return { p, r: p.clone().sub(center) };
+    });
+    const SIDE = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+    const ROLL = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
 
-      for (const [dir, cap] of [
-        [new THREE.Vector3(0, 0, 1).applyQuaternion(q), capSide], // side grip
-        [new THREE.Vector3(1, 0, 0).applyQuaternion(q), capRoll], // roll resistance
-      ] as const) {
-        const vAlong = vp.dot(dir);
-        if (Math.abs(vAlong) < 1e-4) continue;
-        // Effective mass along `dir` at this point: 1/(1/m + τ·I⁻¹·τ),
-        // τ = r×dir in the body frame (undershoot-safe: never overshoots).
-        const tl = r.clone().cross(dir).applyQuaternion(qInv);
-        const invEff =
-          1 / m + (tl.x * tl.x) / Ix + (tl.y * tl.y) / Iy + (tl.z * tl.z) / Iz;
-        const eff = 1 / invEff;
-        const j = Math.min(Math.abs(vAlong) * eff, cap);
-        const imp = dir.clone().multiplyScalar(-Math.sign(vAlong) * j);
-        this.chassis.applyImpulseAtPoint(imp, p, true);
+    /** One relaxation sweep over all four wheels, in the given order. */
+    const sweep = (order: typeof wheelPoints): void => {
+      for (const { p, r } of order) {
+        for (const [dir, key] of [
+          [SIDE, 'side'],
+          [ROLL, 'roll'],
+        ] as const) {
+          if (budget[key] <= 0) continue; // frame's grip already spent
+          // Read the velocity FRESH for every impulse: each one changes the
+          // velocity the next one is measured against (applyImpulseAtPoint
+          // applies instantly). Computing all eight off one reading made
+          // every one of them aim at the SAME pre-impulse velocity, so
+          // together they delivered several times what was needed and
+          // FLIPPED the residual instead of killing it — a frame-rate
+          // chatter that never decayed once two Cars had touched (ticket 12).
+          const vN = this.chassis.linvel();
+          const wN = this.chassis.angvel();
+          const vp = new THREE.Vector3(vN.x, vN.y, vN.z).add(
+            new THREE.Vector3(wN.x, wN.y, wN.z).cross(r),
+          );
+          const vAlong = vp.dot(dir);
+          if (Math.abs(vAlong) < 1e-6) continue;
+          // Effective mass along `dir` at this point: 1/(1/m + τ·I⁻¹·τ),
+          // τ = r×dir in the body frame.
+          const tl = r.clone().cross(dir).applyQuaternion(qInv);
+          const invEff =
+            1 / m + (tl.x * tl.x) / Ix + (tl.y * tl.y) / Iy + (tl.z * tl.z) / Iz;
+          const eff = 1 / invEff;
+          const j = Math.min(Math.abs(vAlong) * eff, budget[key]);
+          if (j <= 0) continue;
+          this.chassis.applyImpulseAtPoint(
+            dir.clone().multiplyScalar(-Math.sign(vAlong) * j),
+            p,
+            true,
+          );
+          budget[key] -= j;
+        }
       }
+    };
+
+    // The four points are coupled through one rigid body, so a single pass
+    // does not satisfy them all — and a single pass is ORDER-BIASED: it turns
+    // a dead-centre Push into a systematic curve, which is exactly the kind of
+    // invented behaviour ADR-0001 rejects. Alternating sweeps converge (and
+    // the reversed second sweep cancels most of the bias).
+    const backward = [...wheelPoints].reverse();
+    for (let i = 0; i < SWEEPS; i++) {
+      sweep(i % 2 === 0 ? wheelPoints : backward);
     }
   }
 

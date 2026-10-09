@@ -23,6 +23,18 @@ export function createHud(
     font: inherit; cursor: pointer;`;
   const activeStyle = 'background: rgba(255,255,255,.85); color: #222; text-shadow: none;';
 
+  // Which Car is being aimed at right now — with several Cars on the Track,
+  // whose Turn it is has to be readable, not remembered.
+  const who = document.createElement('div');
+  who.style.cssText =
+    'display: flex; align-items: center; gap: 6px; font-weight: 600;';
+  const swatch = document.createElement('span');
+  swatch.style.cssText =
+    'width: 12px; height: 12px; border-radius: 50%; border: 1px solid rgba(255,255,255,.7);';
+  const whoText = document.createElement('span');
+  who.append(swatch, whoText);
+  root.appendChild(who);
+
   const modes = document.createElement('div');
   modes.style.cssText = 'display: flex; gap: 6px;';
   const sandboxBtn = document.createElement('button');
@@ -51,7 +63,7 @@ export function createHud(
   const nextTurnBtn = document.createElement('button');
   nextTurnBtn.textContent = 'Next Turn';
   const resetBtn = document.createElement('button');
-  resetBtn.textContent = 'Reset Car';
+  resetBtn.textContent = 'Reset Cars';
   for (const b of [nextTurnBtn, resetBtn]) {
     b.style.cssText = btnStyle;
     actions.appendChild(b);
@@ -88,6 +100,10 @@ export function createHud(
     },
     setLapTime(t: number | null): void {
       lap.textContent = t == null ? 'Lap: —' : `Lap: ${(t / 1000).toFixed(2)}s`;
+    },
+    setCarLabel(name: string, color: number): void {
+      whoText.textContent = name;
+      swatch.style.background = `#${color.toString(16).padStart(6, '0')}`;
     },
     setMode(m: Mode): void {
       sandboxBtn.style.cssText = btnStyle + (m === 'sandbox' ? activeStyle : '');

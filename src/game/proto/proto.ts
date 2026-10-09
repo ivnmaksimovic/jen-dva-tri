@@ -2,9 +2,9 @@ import * as THREE from 'three';
 import GUI from 'lil-gui';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Game } from '../Game.js';
-import { buildEnvironment, GRAVITY, initPhysics } from './world.js';
+import { buildEnvironment, GRAVITY, initPhysics, terrainY } from './world.js';
 import { Track } from './track.js';
-import { CAR_PRESETS, Car, type CarParams } from './car.js';
+import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from './car.js';
 import { setupSlingshot, type PushParams } from './slingshot.js';
 import { Rules, START_S } from './rules.js';
 import { createHud } from './hud.js';
@@ -54,21 +54,29 @@ export async function createProtoScene(game: Game): Promise<void> {
   buildEnvironment(world, scene);
   const track = new Track(scene);
 
-  // --- Car + rules + HUD ---
-  let carParams: CarParams = { ...CAR_PRESETS[1] };
+  // --- Several Cars, each with its own params (ticket 12) ---
   const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5 };
   const camParams = { height: 5.2, back: 1.8, follow: 5 };
 
   // Persist tuning across reloads (per browser). testField is NOT persisted.
+  // v1 stored ONE global CarParams; v2 stores one set per Car, so v1 saves are
+  // ignored for the Cars but still restore Push/camera tuning.
   const STORE_KEY = 'jdt-v0-tuning';
+  const STORE_VERSION = 2;
+  const carList: CarParams[] = STARTING_GRID.map((p) => ({ ...p }));
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as {
-      carParams?: Partial<CarParams>;
+      version?: number;
+      cars?: Partial<CarParams>[];
       pushParams?: Partial<PushParams>;
       camParams?: { height?: number; back?: number };
     } | null;
     if (saved) {
-      Object.assign(carParams, saved.carParams ?? {});
+      if (saved.version === STORE_VERSION && Array.isArray(saved.cars)) {
+        saved.cars.forEach((patch, i) => {
+          if (carList[i]) Object.assign(carList[i], patch);
+        });
+      }
       Object.assign(pushParams, saved.pushParams ?? {});
       Object.assign(camParams, saved.camParams ?? {});
     }
@@ -78,30 +86,75 @@ export async function createProtoScene(game: Game): Promise<void> {
   function persist(): void {
     localStorage.setItem(
       STORE_KEY,
-      JSON.stringify({ carParams, pushParams, camParams }),
+      JSON.stringify({ version: STORE_VERSION, cars: carList, pushParams, camParams }),
     );
   }
 
-  let car = new Car(world, scene, carParams);
+  const cars: Car[] = carList.map((p) => new Car(world, scene, p));
+  /** The Car being aimed at: camera, rules reads and the tuning panel's
+   *  target. Tapping a Car in the scene selects it. */
+  let active = 0;
+  const getCar = (): Car => cars[active];
 
-  function placeAtStart(): void {
-    const p = track.pointAt(START_S);
-    car.reset(new THREE.Vector3(p.x, p.y, p.z), Math.atan2(-p.dz, p.dx));
+  /** Clearance between two Cars placed abreast (2 mm real). */
+  const GRID_GAP = 0.02;
+  /**
+   * Starting grid: two Cars abreast and NEARLY TOUCHING (whether two Cars rest
+   * honestly side by side is the question ticket 12 exists to answer — it
+   * should be visible before anything is pushed), the odd Car out in front.
+   */
+  function placeOnTrack(): void {
+    const AHEAD = 1.1; // third Car sits this far down the Track
+    for (let i = 0; i < cars.length; i++) {
+      const lat =
+        i === 0
+          ? -(carHalfWidth(carList[0]) + carHalfWidth(carList[1]) + GRID_GAP) / 2
+          : i === 1
+            ? (carHalfWidth(carList[0]) + carHalfWidth(carList[1]) + GRID_GAP) / 2
+            : 0;
+      const ds = i === 2 ? AHEAD : 0;
+      const p = track.pointAt(START_S + ds);
+      const yaw = Math.atan2(-p.dz, p.dx);
+      const nx = -p.dz;
+      const nz = p.dx; // left of travel
+      cars[i].reset(new THREE.Vector3(p.x + nx * lat, p.y, p.z + nz * lat), yaw);
+    }
   }
-  placeAtStart();
+
+  /** Bare concrete row (Test field): all facing +X, gaps `GRID_GAP` apart. */
+  function placeTestRow(): void {
+    let x = 12.2;
+    for (const car of cars) {
+      car.reset(new THREE.Vector3(x, 0, 11), 0);
+      x += 2 * carHalfWidth(car.params) + GRID_GAP;
+    }
+  }
+
+  placeOnTrack();
 
   const rulesRef: { rules?: Rules } = {};
   const hud = createHud(
     () => rulesRef.rules?.nextTurn(),
-    () => placeAtStart(),
+    () => {
+      placeOnTrack();
+      rulesRef.rules?.setMode(rulesRef.rules.mode);
+      hud.flash('Cars back on the grid');
+    },
     (m) => rulesRef.rules?.setMode(m),
   );
-  const rules = new Rules(track, () => car, hud);
+  const rules = new Rules(
+    track,
+    () => cars,
+    () => active,
+    hud,
+  );
   rulesRef.rules = rules;
 
   setupSlingshot(
     game,
-    () => car,
+    getCar,
+    () => cars,
+    (picked) => setActive(cars.indexOf(picked)),
     pushParams,
     () => rules.pushUsed(),
     (reason) => hud.flash(reason),
@@ -115,6 +168,17 @@ export async function createProtoScene(game: Game): Promise<void> {
   // --- Tuning panel ---
   const gui = new GUI({ title: 'v0 prototype' });
 
+  // --- Which Car the tuning below applies to. Tapping a Car in the scene
+  // selects it, so the GUI and the aim are the SAME selection — they cannot
+  // drift apart and leave you tuning a Car you are not pushing.
+  const selected = { car: 0 };
+  const carOptions = () =>
+    Object.fromEntries(cars.map((c, i) => [`#${i + 1} ${c.params.name}`, i]));
+  const selectCtrl = gui
+    .add(selected, 'car', carOptions())
+    .name('Tune Car')
+    .onChange((i: number) => setActive(Number(i)));
+
   // Surfaces: presets of the grip values (sideFriction/rollFriction are the
   // Surface — the distributed wheel friction makes them feel physical).
   const SURFACES = {
@@ -124,35 +188,43 @@ export async function createProtoScene(game: Game): Promise<void> {
     'Tiled balcony': { rollFriction: 0.02, sideFriction: 0.4, angularDamping: 0.12 },
     'Ice (raw strikes)': { rollFriction: 0.005, sideFriction: 0.08, angularDamping: 0.03 },
   } as const;
+  function applySurface(name: string): void {
+    Object.assign(carList[active], SURFACES[name as keyof typeof SURFACES]);
+    rebuildCar(active);
+    persist();
+    buildCarFolder();
+  }
   gui
     .add({ surface: 'Smooth concrete' }, 'surface', Object.keys(SURFACES))
-    .onChange((name: string) => {
-      Object.assign(carParams, SURFACES[name as keyof typeof SURFACES]);
-      rebuildCar();
-      persist();
-      for (const c of carFolder.children) {
-        if ('updateDisplay' in c) c.updateDisplay();
-      }
-    });
+    .name('Surface (this Car)')
+    .onChange(applySurface);
 
   const carFolder = gui.addFolder('Car (rebuilds)');
-  carFolder.add(carParams, 'mass', 0.3, 4, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'sideFriction', 0.05, 1.5, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
-  carFolder.add(carParams, 'angularDamping', 0, 2, 0.05).onFinishChange(() => { rebuildCar(); persist(); });
+  function buildCarFolder(): void {
+    for (const c of [...carFolder.children]) c.destroy();
+    const p = carList[active];
+    carFolder.title(`Car — ${p.name} (rebuilds)`);
+    carFolder.add(p, 'name').name('model').disable();
+    carFolder.addColor(p, 'color').onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'mass', 0.3, 4, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'sideFriction', 0.05, 1.5, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'angularDamping', 0, 2, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
+  }
+  buildCarFolder();
   gui
     .add({ preset: CAR_PRESETS[1].name }, 'preset', CAR_PRESETS.map((p) => p.name))
+    .name('Preset (this Car)')
     .onChange((name: string) => {
       const preset = CAR_PRESETS.find((p) => p.name === name);
       if (!preset) return;
-      carParams = { ...preset };
-      rebuildCar();
+      // Keep the paint: colour is how you tell the Cars apart.
+      carList[active] = { ...preset, color: carList[active].color };
+      rebuildCar(active);
       persist();
-      for (const c of carFolder.children) {
-        if ('updateDisplay' in c) c.updateDisplay();
-      }
+      syncCarLabels();
     });
   const pushFolder = gui.addFolder('Push');
   pushFolder.add(pushParams, 'impulseScale', 0.5, 12, 0.1).onFinishChange(persist);
@@ -168,11 +240,11 @@ export async function createProtoScene(game: Game): Promise<void> {
       hud.setPushes('∞');
       hud.setLapTime(null);
       hud.flash('Test field — no track, no rules, tune the feel');
-      car.reset(new THREE.Vector3(13, 0, 11), 0); // open ground inside the loop
+      placeTestRow(); // open ground inside the loop
     } else {
       hud.flash('Back on the Track');
       rules.setMode(rules.mode);
-      placeAtStart();
+      placeOnTrack();
     }
   }
   gui.add(fieldState, 'testField').onChange(setTestField);
@@ -188,29 +260,79 @@ export async function createProtoScene(game: Game): Promise<void> {
     } }, 'resetTuning')
     .name('Reset tuning');
 
-  function rebuildCar(): void {
-    const pos = car.position;
-    const quat = car.quaternion;
-    car.dispose();
-    car = new Car(world, scene, carParams);
-    car.resetPose(pos, quat); // rebuild in place (tuning mid-race is fine)
+  function rebuildCar(i: number): void {
+    const pos = cars[i].position;
+    const quat = cars[i].quaternion;
+    cars[i].dispose();
+    cars[i] = new Car(world, scene, carList[i]);
+    cars[i].resetPose(pos, quat); // rebuild in place (tuning mid-race is fine)
+    if (i === active) hud.setCarLabel(carList[i].name, carList[i].color);
   }
 
-  /** Debug/tuning hook: patch car params and rebuild in place. */
-  function setCarParams(patch: Partial<CarParams>): void {
-    Object.assign(carParams, patch);
-    rebuildCar();
-    persist();
-    for (const c of carFolder.children) {
-      if ('updateDisplay' in c) c.updateDisplay();
-    }
+  /**
+   * Make Car `i` the aimed Car: it is what the camera follows, whose Turn the
+   * HUD counts, and what the tuning panel edits.
+   */
+  function setActive(i: number): void {
+    if (!Number.isFinite(i) || i === active) return;
+    active = Math.max(0, Math.min(cars.length - 1, i));
+    selected.car = active;
+    // setValue() is a no-op once the property already holds the value, and
+    // this is exactly that case — ask the display to catch up explicitly.
+    selectCtrl.updateDisplay();
+    buildCarFolder();
+    rules.refreshHud();
+    hud.setCarLabel(cars[active].params.name, cars[active].params.color);
   }
+
+  /** Keep the selector's labels honest after a name/colour change. */
+  function syncCarLabels(): void {
+    selectCtrl.options(carOptions());
+    selectCtrl.updateDisplay();
+    buildCarFolder();
+    hud.setCarLabel(cars[active].params.name, cars[active].params.color);
+  }
+
+  /** Debug/tuning hook: patch the SELECTED Car's params and rebuild in place. */
+  function setCarParams(patch: Partial<CarParams>): void {
+    Object.assign(carList[active], patch);
+    rebuildCar(active);
+    persist();
+    syncCarLabels();
+  }
+  hud.setCarLabel(cars[active].params.name, cars[active].params.color);
+
+  // Which Car the next Push belongs to: colours already tell the Cars apart,
+  // the ring says which one is AIMED AT before you press (unambiguous even
+  // when two Cars sit touching).
+  const ringGeom = new THREE.BufferGeometry().setFromPoints(
+    Array.from({ length: 49 }, (_, k) => {
+      const a = (k / 48) * Math.PI * 2;
+      return new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+    }),
+  );
+  const ring = new THREE.Line(
+    ringGeom,
+    new THREE.LineBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      depthTest: false,
+      depthWrite: false,
+    }),
+  );
+  ring.renderOrder = 5; // under the strike overlay (arrow 10, marker 20)
+  scene.add(ring);
 
   // --- Main loop: physics, sync, rules, camera ---
   game.onUpdate((dt) => {
     for (let i = 0; i < 4; i++) world.step(); // 4 × 1/240 = one 60 fps frame
-    car.sync(dt);
+    for (const c of cars) c.sync(dt);
     rules.update(dt);
+
+    const car = getCar();
+    ring.position.set(car.position.x, terrainY(car.position.x, car.position.z) + 0.02, car.position.z);
+    ring.scale.setScalar(carHalfWidth(car.params) + 0.07);
 
     const p = car.position;
     camTarget.set(p.x, p.y, p.z);
@@ -227,9 +349,17 @@ export async function createProtoScene(game: Game): Promise<void> {
   // Debug handle for the phone's remote console / tests (throwaway code).
   // `car` is a getter so it stays live across car rebuilds.
   (window as unknown as Record<string, unknown>).__jdt = {
+    /** The aimed Car (kept working for the older single-Car commands). */
     get car() {
-      return car;
+      return cars[active];
     },
+    cars,
+    get active() {
+      return active;
+    },
+    setActive,
+    placeOnTrack,
+    placeTestRow,
     world,
     track,
     rules,
