@@ -226,6 +226,11 @@ export function setupSlingshot(
     // A finger strikes the outer frame, never the middle — clamp the hit.
     contact = car.clampToFrame(hit.point);
     start = g;
+    // The drag is PER GESTURE: it is measured from this touch-down, so it
+    // has to start at nothing. Left unreset it kept the previous gesture's
+    // drag, and a tap that selected another Car released that stale vector
+    // on it — the same strength, the old direction, a Car nobody aimed at.
+    dragVec.set(0, 0, 0);
     // Show the strike point on touch-down, before any drag: the player must
     // see where they caught the frame while deciding the push direction —
     // and can lift and re-strike instead of committing blind.
@@ -274,7 +279,7 @@ export function setupSlingshot(
     // Car. Swinging past it is not a Push — no impulse, and no Push spent
     // (you waved in the air, you did not move your Car).
     if (!aimIsPush(impulse)) {
-      onRefused('A finger can only press — strike into the Car');
+      onRefused('A Car can only be pushed, never pulled — strike into the body');
       return;
     }
     // Strike at the Car's side height and exactly where the finger landed:
@@ -287,6 +292,7 @@ export function setupSlingshot(
   el.addEventListener('pointerup', finish);
   el.addEventListener('pointercancel', () => {
     dragging = false;
+    dragVec.set(0, 0, 0);
     arrow.visible = false;
     marker.visible = false;
   });

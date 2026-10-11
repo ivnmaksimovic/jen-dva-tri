@@ -62,6 +62,23 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   included. A rejected swing applies NO impulse and spends NO Push, and the
   aim arrow turns red while it is still gesture-time, so the rule is visible
   before release rather than discovered by nothing happening.
+- **BUG FIXED (2026-10-11, reported by the user): tapping another Car Pushed
+  it.** Aim state survived the gesture — `dragVec` in `slingshot.ts` was
+  written only on pointermove, so a tap with no movement released the
+  PREVIOUS drag: old length, old direction, struck on whichever Car the tap
+  selected (a no-pull refusal instead, when the stale direction did not go
+  into that Car's body — one bug, two symptoms). Fix: every touch-down starts
+  the drag at zero. The general form worth carrying: gesture state belongs to
+  the gesture and has to die with it — there will be far more per-gesture
+  state in the push-the-phone gesture window (tickets 07/13), including a
+  release time, and leaking THAT one is harder to see than a phantom Push.
+  Guarded by `pnpm check:gesture`: it drives the real control scheme with
+  synthetic pointer events and measures what happened — a tap selects without
+  moving anything, spending a Push, or complaining.
+- The refusal copy now states the rule the player broke, not its mechanism:
+  "A Car can only be pushed, never pulled — strike into the body" (was "A
+  finger can only press", which explained the physics and left the player
+  guessing what to do differently).
 - Ticket 11 (strike point, 2026-10-08): aiming now reads through ONE overlay
   drawn over the Car — a bullseye sprite at the exact strike point + the aim
   arrow, both `transparent` + depthTest/depthWrite off with renderOrder

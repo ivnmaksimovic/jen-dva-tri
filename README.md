@@ -58,6 +58,7 @@ like the car; motion sensors capture the Push — ticket 13) — full design in
 | `pnpm check:cars` | Headless physics check (Node): do several Cars rest, transfer and settle? See `src/game/proto/checks/multi-car.ts` |
 | `pnpm check:surfaces` | Headless check (Node): do Surfaces grip per wheel — same Car different Surfaces, straddling, airborne wheels, the 2 cm sidewalk. See `src/game/proto/checks/surfaces.ts` |
 | `pnpm check:roughness` | Headless check (Node, ticket 17): is bumpy ground felt by 1:64 wheels, through what mechanism, and what it costs. See `src/game/proto/checks/roughness.ts` |
+| `pnpm check:gesture` | Headless check (Node): do gestures stay independent — does tapping another Car select it WITHOUT pushing it? Drives the real control scheme with synthetic pointer events. See `src/game/proto/checks/gesture.ts` |
 | `pnpm android` | Web build → sync to `android/` → open in Android Studio |
 | `pnpm ios` | Web build → sync to `ios/` → open in Xcode |
 

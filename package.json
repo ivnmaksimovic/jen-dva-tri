@@ -11,6 +11,7 @@
     "ios": "pnpm build && cap sync ios && cap open ios",
     "check:cars": "node scripts/headless-check.mjs src/game/proto/checks/multi-car.ts",
     "check:surfaces": "node scripts/headless-check.mjs src/game/proto/checks/surfaces.ts",
+    "check:gesture": "node scripts/headless-check.mjs src/game/proto/checks/gesture.ts",
     "check:roughness": "node scripts/headless-check.mjs src/game/proto/checks/roughness.ts"
   },
   "dependencies": {
