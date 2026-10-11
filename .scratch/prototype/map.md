@@ -155,11 +155,72 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   Car. Car-to-car contact needed NO new physics: only the collision FILTER had
   to gain `CAR_GROUP` — Cars previously passed straight through each other.
 
+- Ticket 16 (spatial Surfaces, **RESOLVED 2026-10-10**): **grip IS a contact
+  now.** `CarParams` lost `sideFriction`/`rollFriction` and gained the TIRE's
+  half of the pair (`tireGrip`, `tireRoll`); `angularDamping` stayed on the
+  Car, because bearing loss is not a Surface property at all. Each of the four
+  wheel points casts straight down once per frame and reads its own Surface,
+  combined as `surface.grip × tire.grip` — no notion of crossing, no notion of
+  "current Surface". Defaults chosen so a default tire on **Concrete
+  reproduces exactly what the old numbers did** (0.7 × 0.5 = 0.35 side,
+  1.0 × 0.03 roll), so today's feel is preserved and every other Surface is a
+  measured departure from it.
+  **Cost of per-wheel grip: essentially nothing.** Same single rigid body, same
+  four points, same relaxation loop; the four extra casts measured 0.138 ms per
+  frame including the rest of the physics. Cheap things are worth being honest
+  about before assuming.
+  **What a straddle actually does (measured, guides future work):** the grip
+  pool is shared by the four contact points of ONE rigid body, so the available
+  deceleration comes from the *mean* of the μ under the wheels — a Car half on
+  Asphalt and half on Glass rolls like the average of them, strictly between,
+  with no line of code picking one. It does NOT produce a big yaw from
+  left/right differences: with four points on one mass, impulses distribute by
+  demand, not by μ. Real per-tyre torque would need wheels that are separate
+  bodies carrying their own load — that is Car v1, already rejected for its own
+  reasons. If the game ever wants that, it is a wheel-joint decision, not a
+  Surface one.
+  **Wheels that are not touching contribute nothing** (user's call: no feel
+  hacks). Measured: 14 frames of free flight keep 98.8% of their speed while
+  the same 14 frames rolling on Asphalt keep 79.9%. This is also what will make
+  bumpy ground (ticket 17) readable later.
+  **LESSON — four ground slabs laid edge to edge give every joint a vertical
+  face, and a 1:64 wheel finds it.** Measured: a Car crossing a flat joint rode
+  up 1 mm and lost half its speed in ONE frame (a 17× deceleration spike); the
+  roll went 61 mm inside one square vs 45 mm across a joint, plus 9.5 mm of
+  sideways kick. Buried seams with overlapping colliders did NOT fix it — the
+  ball meets the neighbour's top *corner* before its centre crosses, whatever
+  the overlap. **The fix was structural: two layers.** `groundPieces()` is what
+  you ROLL ON (ONE seamless flat slab + the raised square + the two ramps) and
+  `surfacePads()` is what you are STANDING ON (one thin pad per square, in a
+  separate collision group that nothing collides with, found only by the
+  downward cast). Pads can meet at exact boundaries because they never make
+  contact — the crossing roll became byte-identical to the inside-one-square
+  roll. This is also the honest place for material regions generally: physics
+  wants continuous surfaces, materials want regions.
+  **Load follows the contacts that are down:** the body's weight (Σ Nᵢ = m·G)
+  is shared evenly between touching wheels, so a Car hanging half over a curb
+  does NOT lose half its grip — the wheels still down carry it. This corrects
+  what was assumed while grilling this ticket (that the pool would halve);
+  check 6 in `src/game/proto/checks/surfaces.ts` is what settled it.
+- Test ground (ticket 16): the ground under the same Track loop is now **four
+  joined squares meeting at one point** near the loop's centre, one Surface
+  each — **Asphalt, Concrete, Tiles, Glass** — and one of them is raised **2 cm
+  as a sidewalk** (it was 4 cm; at 1:64 even 2 cm is a full wheel DIAMETER, so
+  a model car cannot climb a curb at all — the Track gets up over the two worn
+  ramps and every other edge stays a hard curb). Each square's material is
+  **swappable from the GUI**, so any two can be compared along the same stretch
+  of ground, and the HUD names the Surface under each wheel (the only way to
+  watch a straddle rather than believe it). Two consequences worth knowing: the
+  Bridge moved wholly inside the raised square (chalk is drawn at one height;
+  straddling the height step drew half of it buried), and the Test-field row
+  now starts inside ONE square, so comparisons start on the same Surface.
+
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
-passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), now
-running several Cars on the Track (ticket 12, RESOLVED 2026-10-09).
-Current phase: feel tuning with several Cars, then push-the-phone
-(see Roadmap).**
+passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), several
+Cars on the Track (ticket 12, RESOLVED 2026-10-09), and now spatial Surfaces
+with the grip resolved per wheel (ticket 16, RESOLVED 2026-10-10).
+Current phase: the user Judges whether the four Surfaces feel different on
+  the phone, then push-the-phone (see Roadmap).**
 
 User verdict 2026-10-06: **the prototype still does not feel great** — but it
 may be a matter of settings rather than model. So: the model is not yet
@@ -170,9 +231,10 @@ tuning before being treated as physics (see the tuning LESSON above).
 ## Roadmap (what's next)
 
 1. **Feel tuning** (current phase — USER-held, not an agent task) — the
-   user dials in Surfaces and car params on their phone; tuning persists
-   per browser (lil-gui → localStorage). Agents: physics feel params are
-   the user's domain.
+   user dials in Surfaces (GUI → `Surfaces (the world)`) and tire params on
+   their phone; tuning persists per browser (lil-gui → localStorage, now v3:
+   per-Car roll/side numbers no longer exist). Agents: physics feel numbers
+   are the user's domain.
 2. **Push-the-phone** — the user's main-bet control scheme: ticket 13 (open)
    — build it per the settled design in ticket 07. HTTPS dev server already
    in place.
@@ -187,12 +249,17 @@ tuning before being treated as physics (see the tuning LESSON above).
      once the wheel-friction bugs above were fixed, and that fix is the
      ticket's real output. Remaining (user's): phone check of frame pacing and
      of reading three Cars at arm's length
-   - ticket 14 — **surfaces along a Track + roughness** (spatial grip per
-     ADR-0002, plus the open bet: does bumpy/bad concrete that small wheels
-     feel earn its complexity, or do we drop it?)
+   - surfaces along a Track + roughness — SPLIT 2026-10-10 into two tickets
+     (grip vs shape are different bets with different risk; the original 14 was
+     deleted, its content folded into these two):
+     - **16 — spatial Surfaces, grip per wheel** — RESOLVED 2026-10-10 (four-
+       square test ground, grip read per wheel, per `pnpm check:surfaces`).
+       Remaining (user's, on the phone): does the difference between the four
+       Surfaces READ? Numbers are the user's.
+     - **17 — roughness bet** — open, its own decision gate, now the frontier
 
-   Ordering note: 11 and 12 are done, so the frontier scan now picks 14
-   (surfaces + roughness). Say the word if push-the-phone should jump ahead.
+   Ordering note: 11, 12 and 16 are done, so the frontier scan now picks 17
+   (roughness). Say the word if push-the-phone should jump ahead.
 3. **Flick** — maybe, much later (ticket 01).
 4. **v1: stop throwing away** — once the controls feel right, grill the
    real game's design (multiplayer rules: car-to-car contact, turn order,
@@ -201,7 +268,7 @@ tuning before being treated as physics (see the tuning LESSON above).
    the design; it is NOT the seed of the codebase.
 
 "Do the next thing": run the frontier scan (docs/agents/issue-tracker.md)
-→ currently ticket 14 (open): surfaces along a Track + roughness.
+→ currently ticket 16 (open): spatial Surfaces, grip per wheel.
 
 ## Decisions so far
 

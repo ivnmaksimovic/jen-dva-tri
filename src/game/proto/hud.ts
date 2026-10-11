@@ -58,6 +58,26 @@ export function createHud(
   info.append(pushes, lap);
   root.appendChild(info);
 
+  // Ticket 16: the Surface under EACH wheel. The only way to see "no
+  // transition code" happening rather than believe it — a Car straddling a
+  // boundary shows two different names at once.
+  const wheels = document.createElement('div');
+  wheels.style.cssText =
+    'display: flex; gap: 5px; font-size: 11px; font-weight: 600; min-height: 14px;';
+  root.appendChild(wheels);
+  // Order matches Car's wheel colliders: rear-left, rear-right, front-left,
+  // front-right (local X = forward, local Z = the Car's right).
+  const wheelCells = ['RL', 'RR', 'FL', 'FR'].map((tag) => {
+    const cell = document.createElement('span');
+    cell.dataset.tag = tag;
+    cell.style.cssText =
+      'padding: 1px 5px; border-radius: 4px; background: rgba(0,0,0,.45);'
+      + ' border: 1px solid rgba(255,255,255,.35); text-shadow: none;';
+    cell.textContent = `${tag}: —`;
+    wheels.appendChild(cell);
+    return cell;
+  });
+
   const actions = document.createElement('div');
   actions.style.cssText = 'display: flex; gap: 6px;';
   const nextTurnBtn = document.createElement('button');
@@ -104,6 +124,14 @@ export function createHud(
     setCarLabel(name: string, color: number): void {
       whoText.textContent = name;
       swatch.style.background = `#${color.toString(16).padStart(6, '0')}`;
+    },
+    setWheelSurfaces(reads: { label: string; color: number }[]): void {
+      wheelCells.forEach((cell, i) => {
+        const read = reads[i];
+        cell.textContent = `${wheelCells[i].dataset.tag} ${read ? read.label : 'air'}`;
+        cell.style.color = read ? `#${read.color.toString(16).padStart(6, '0')}` : '#ffffff';
+        cell.style.opacity = read ? '1' : '0.55';
+      });
     },
     setMode(m: Mode): void {
       sandboxBtn.style.cssText = btnStyle + (m === 'sandbox' ? activeStyle : '');

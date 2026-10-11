@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { GRAVITY } from './world.js';
+import type { SurfaceDef, SurfaceField } from './surfaces.js';
 
 /**
  * THROWAWAY PROTOTYPE CODE — the Car, v2: ONE rigid body.
@@ -22,9 +23,21 @@ export interface CarParams {
   mass: number;
   wheelRadius: number; // collider spheres + visuals + ride height
   wheelHalfWidth: number; // visual only
-  rollFriction: number; // decel = rollFriction·G along heading (wheels rolling)
-  sideFriction: number; // decel = sideFriction·G sideways (tires gripping)
-  angularDamping: number; // how long a spin (curve Push) lasts
+  /**
+   * The tire's SHARE of the side grip. Neither number is a friction on its
+   * own — the contact uses `surface.grip × tireGrip` (ADR-0002). Defaults are
+   * set so a default tire on Concrete reproduces the single-number model this
+   * replaced: 0.7 × 0.5 = 0.35, the μ this Car used to carry.
+   */
+  tireGrip: number;
+  /** The tire's share of the rolling resistance (`surface.roll × tireRoll`). */
+  tireRoll: number;
+  /**
+   * Bearing/hub loss: a Body-level decay of spin, NOT part of any Surface —
+   * how long a curve Push keeps turning after the strike. It never touches
+   * the grip budget; a low-friction Surface already spins longer by itself.
+   */
+  angularDamping: number;
 }
 
 export const CAR_PRESETS: CarParams[] = [
@@ -34,9 +47,8 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 0.8,
     wheelRadius: 0.06,
     wheelHalfWidth: 0.025,
-    // Friction here = surface defaults (smooth concrete); pick a Surface.
-    rollFriction: 0.03,
-    sideFriction: 0.35,
+    tireGrip: 0.5,
+    tireRoll: 1.0,
     angularDamping: 0.2,
   },
   {
@@ -45,8 +57,8 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 1.3,
     wheelRadius: 0.075,
     wheelHalfWidth: 0.03,
-    rollFriction: 0.03,
-    sideFriction: 0.35,
+    tireGrip: 0.5,
+    tireRoll: 1.0,
     angularDamping: 0.2,
   },
   {
@@ -55,8 +67,8 @@ export const CAR_PRESETS: CarParams[] = [
     mass: 2.4,
     wheelRadius: 0.1,
     wheelHalfWidth: 0.035,
-    rollFriction: 0.03,
-    sideFriction: 0.35,
+    tireGrip: 0.5,
+    tireRoll: 1.0,
     angularDamping: 0.2,
   },
 ];
@@ -87,6 +99,14 @@ const CHASSIS_LIFT = 0.035; // body origin above wheel axles
  */
 const SWEEPS = 4;
 
+/**
+ * How far a wheel can be from a Surface and still count as TOUCHING it:
+ * 1.5 mm real. Below this nothing knows the difference; above it the wheel is
+ * genuinely off the ground (over a curb edge, or off a bump) and contributes
+ * no grip at all — which is what makes a wheel hanging in the air honest.
+ */
+const CONTACT_TOL = 0.015;
+
 const ENV_GROUP = 0x0001;
 const CAR_GROUP = 0x0002;
 const groups = (membership: number, filter: number) => (membership << 16) | filter;
@@ -101,14 +121,13 @@ const CAR_FILTER = ENV_GROUP | CAR_GROUP;
 /**
  * The Cars that start on the Track for the multi-Car experiments (ticket 12).
  * Two twins — same numbers, different colour — and one that differs in mass,
- * wheel size and grip, so "whose Car is whose" is answerable at a glance and
+ * wheel size and tires, so "whose Car is whose" is answerable at a glance and
  * every read during play says which Car it came from.
  *
- * NOTE on rollFriction/sideFriction: they live on CarParams here, but they are
- * really properties of the contact (Tire × Surface) — see ADR-0002. The third
- * Car carries its own numbers anyway, because the question ticket 12 asks is
- * whether several DIFFERENT bodies behave; per-surface grip (ticket 14) will
- * move these off the Car later.
+ * NOTE on tireGrip/tireRoll: these are the TIRE's half of the pair. The
+ * third Car is the stickier-tyred, draggier one (0.8/2.0 against Concrete:
+ * μ 0.56 and roll 0.06 — the numbers it used to carry outright before
+ * ticket 16 split grip between Surface and tire, per ADR-0002).
  */
 export const STARTING_GRID: CarParams[] = [
   { ...CAR_PRESETS[0], name: 'Red', color: 0xd94f4f },
@@ -117,8 +136,8 @@ export const STARTING_GRID: CarParams[] = [
     ...CAR_PRESETS[2],
     name: 'Green (heavy)',
     color: 0x3fbf6a,
-    rollFriction: 0.06,
-    sideFriction: 0.55,
+    tireGrip: 0.8,
+    tireRoll: 2.0,
     angularDamping: 0.45,
   },
 ];
@@ -136,12 +155,22 @@ export class Car {
   chassis: RAPIER.RigidBody;
   readonly params: CarParams;
   private readonly world: RAPIER.World;
+  /** Where grip comes from: the Surface under each wheel (ADR-0002). */
+  private readonly field: SurfaceField;
   private readonly chassisMesh: THREE.Mesh;
   private readonly wheelMeshes: THREE.Mesh[] = [];
   private readonly wheelLocal: THREE.Vector3[] = [];
+  /** What each wheel was standing on last frame (null = nothing there) — HUD. */
+  private wheelSamples: (SurfaceDef | null)[] = [];
 
-  constructor(world: RAPIER.World, scene: THREE.Scene, params: CarParams) {
+  constructor(
+    world: RAPIER.World,
+    scene: THREE.Scene,
+    params: CarParams,
+    field: SurfaceField,
+  ) {
     this.world = world;
+    this.field = field;
     this.params = { ...params };
     const r = this.params.wheelRadius;
     const chassisY = r + CHASSIS_LIFT;
@@ -254,13 +283,18 @@ export class Car {
     this.chassis.setAngvel({ x: 0, y: 0, z: 0 }, true);
   }
 
+  /** What each wheel is standing on (null = nothing there) — for the readout. */
+  wheelSurfaces(): (SurfaceDef | null)[] {
+    return this.wheelSamples;
+  }
+
   /**
    * Distributed tire friction: Coulomb side-grip and rolling resistance
    * applied at the FOUR WHEEL contact points. This is what makes a struck
-   * Car pivot around its far wheels instead of its center — the surface grips
-   * the tires that aren't sliding — and what makes Surfaces feel different:
-   * sideFriction/rollFriction ARE the Surface. Replaces whole-body velocity
-   * shaping (v1 of the feel model).
+   * Car pivot around its far wheels instead of its center — the Surface grips
+   * the tires that aren't sliding — and it is where the Surface meets the
+   * tire: nothing here knows or remembers which Surface is "current", each
+   * wheel simply asks what is under it, every frame (ADR-0002).
    */
   private applyWheelFriction(dt: number): void {
     if (dt <= 0) return;
@@ -280,28 +314,42 @@ export class Car {
     const Iy = (m * (lx * lx + lz * lz)) / 12;
     const Iz = (m * (lx * lx + ly * ly)) / 12;
 
-    // Coulomb budget for the WHOLE frame, shared by the four wheels:
-    // μ · m · G · dt per direction. It has to be a frame budget, not a
-    // per-impulse cap: every extra relaxation sweep would otherwise spend the
-    // budget again, so iterating N times braked N times as hard (a strike that
-    // rolled 149 cm on one sweep rolled 28 cm on six — same tyres, budget
-    // spent six times). Sharing one budget also lets a locking wheel take more
-    // than its share, which is what a real contact does.
+    // One sample per wheel per frame: what is this wheel standing on? Nothing
+    // about last frame is remembered, so crossing from one Surface to another
+    // needs no transition code — the next sample already IS the new answer.
+    const wheelRadius = this.params.wheelRadius;
+    const tireGrip = this.params.tireGrip;
+    const tireRoll = this.params.tireRoll;
+    const sampled = this.wheelLocal.map((local) => {
+      const p = center.clone().add(local.clone().applyQuaternion(q));
+      const hit = this.field.sample(this.world, p, wheelRadius);
+      const touching = !!hit && Math.abs(hit.gap) <= CONTACT_TOL;
+      return { p, r: p.clone().sub(center), surface: hit?.surface ?? null, touching };
+    });
+    this.wheelSamples = sampled.map((w) => (w.touching ? w.surface : null));
+
+    // A wheel with nothing under it grips nothing — no exceptions for a Car
+    // hanging over a curb or over a bump. The load then sits on the contacts
+    // that ARE down (Σ Nᵢ = m·G), shared evenly between them: the pool is the
+    // sum of those contacts' Coulomb caps, each carrying its own Surface's μ.
+    // All four down on one Surface collapses to exactly the old single-μ
+    // budget (μ·m·G·dt), so nothing about today's feel moves to get here.
+    const down = sampled.filter((w) => w.touching);
+    if (down.length === 0) return; // fully airborne: no grip anywhere
+    const load = (m / down.length) * GRAVITY * dt;
     const budget = {
-      side: this.params.sideFriction * GRAVITY * m * dt,
-      roll: this.params.rollFriction * GRAVITY * m * dt,
+      side: load * down.reduce((sum, w) => sum + (w.surface?.grip ?? 0) * tireGrip, 0),
+      roll: load * down.reduce((sum, w) => sum + (w.surface?.roll ?? 0) * tireRoll, 0),
     };
 
-    const wheelPoints = this.wheelLocal.map((local) => {
-      const p = center.clone().add(local.clone().applyQuaternion(q));
-      return { p, r: p.clone().sub(center) };
-    });
+    const wheelPoints = sampled;
     const SIDE = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
     const ROLL = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
 
     /** One relaxation sweep over all four wheels, in the given order. */
     const sweep = (order: typeof wheelPoints): void => {
-      for (const { p, r } of order) {
+      for (const { p, r, touching } of order) {
+        if (!touching) continue; // a wheel in the air receives nothing
         for (const [dir, key] of [
           [SIDE, 'side'],
           [ROLL, 'roll'],

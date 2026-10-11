@@ -88,7 +88,13 @@ export class Track {
     { x: 16, z: -0.7 },
   ];
   readonly lake = { cx: 26, cz: 12.5, rx: 1.0, rz: 1.3 };
-  readonly bridge = { x1: 12.25, x2: 13.75, z1: 20.5, z2: 23.5 };
+  /**
+   * The Bridge sits wholly INSIDE the raised square (ticket 16 moved it from
+   * x 12.25–13.75, which straddled the square's edge and its ramp). Chalk is
+   * drawn at one height for the whole shape, so an offset across a height
+   * step drew half of it buried and half of it floating.
+   */
+  readonly bridge = { x1: 10.4, x2: 11.9, z1: 20.5, z2: 23.5 };
 
   constructor(scene: THREE.Scene) {
     this.path = roundedRectPath();

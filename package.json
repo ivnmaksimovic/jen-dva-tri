@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "android": "pnpm build && cap sync android && cap open android",
     "ios": "pnpm build && cap sync ios && cap open ios",
-    "check:cars": "node scripts/headless-check.mjs src/game/proto/checks/multi-car.ts"
+    "check:cars": "node scripts/headless-check.mjs src/game/proto/checks/multi-car.ts",
+    "check:surfaces": "node scripts/headless-check.mjs src/game/proto/checks/surfaces.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

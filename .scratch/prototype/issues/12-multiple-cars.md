@@ -163,6 +163,6 @@ centre vs corner strike:            centre 0.01°, corner 68.6°
   clearly at arm's length.
 - Green's different roll/side friction sits *on the Car*, but grip is a property
   of the contact (Tire × Surface) per ADR-0002 — this is deliberately parked
-  until ticket 14 moves grip off `CarParams`.
+  until ticket 16 moves grip off `CarParams`.
 - Nothing here explores the penalise variant of car-to-car contact; that rule is
   still fog.

@@ -58,6 +58,13 @@ The real-world surface under the Track — pebbles, potholes, bumps, drops
 between surfaces at different heights. Found, not drawn; Cars can bounce or
 flip on it.
 
+**Surface**:
+What a wheel is standing on — concrete, asphalt, tiles, glass. Grip belongs
+to the *contact*, not to the Car: it is Surface × tire, read per wheel, every
+frame. A single Track crosses Surfaces (tiled balcony onto a concrete path),
+so two wheels of one Car can be on two Surfaces at once.
+_Avoid_: material, ground, floor (a Surface is a thing with grip, not a colour)
+
 **Rock**:
 A solid white triangle obstacle. Touching it with even one wheel sends the
 Car back to the closest Checkpoint.

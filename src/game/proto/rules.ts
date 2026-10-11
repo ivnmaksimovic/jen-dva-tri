@@ -25,6 +25,8 @@ export interface Hud {
   setMode(mode: Mode): void;
   /** Which Car is being aimed at right now (name + colour swatch). */
   setCarLabel(name: string, color: number): void;
+  /** What each wheel is standing on, per wheel, in order (ticket 16 readout). */
+  setWheelSurfaces(reads: { label: string; color: number }[]): void;
 }
 
 const RESET_BACK = 0.3; // place the Car this far behind a checkpoint line

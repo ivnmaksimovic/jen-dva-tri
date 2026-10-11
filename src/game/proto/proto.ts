@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import GUI from 'lil-gui';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Game } from '../Game.js';
-import { buildEnvironment, GRAVITY, initPhysics, terrainY } from './world.js';
+import { buildEnvironment, GRAVITY, initPhysics, repaintTerrain, terrainY } from './world.js';
+import {
+  SQUARES,
+  SQUARE_LABELS,
+  SURFACES,
+  SURFACE_KEYS,
+  SurfaceField,
+  type SurfaceKey,
+} from './surfaces.js';
 import { Track } from './track.js';
 import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from './car.js';
 import { setupSlingshot, type PushParams } from './slingshot.js';
@@ -51,7 +59,10 @@ export async function createProtoScene(game: Game): Promise<void> {
   game.renderer.shadowMap.enabled = true;
   game.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  buildEnvironment(world, scene);
+  // Surfaces: what each wheel stands on (ADR-0002 — grip is a property of the
+  // contact, so this is World state, never Car state).
+  const field = new SurfaceField();
+  const terrainMeshes = buildEnvironment(world, scene, field);
   const track = new Track(scene);
 
   // --- Several Cars, each with its own params (ticket 12) ---
@@ -62,20 +73,39 @@ export async function createProtoScene(game: Game): Promise<void> {
   // v1 stored ONE global CarParams; v2 stores one set per Car, so v1 saves are
   // ignored for the Cars but still restore Push/camera tuning.
   const STORE_KEY = 'jdt-v0-tuning';
-  const STORE_VERSION = 2;
+  // v3: grip moved off the Car onto the contact (Surface × tire, ticket 16),
+  // so saved per-Car roll/side numbers are meaningless — v2 saves are dropped.
+  const STORE_VERSION = 3;
   const carList: CarParams[] = STARTING_GRID.map((p) => ({ ...p }));
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as {
       version?: number;
       cars?: Partial<CarParams>[];
+      surfaces?: Partial<Record<SurfaceKey, { grip?: number; roll?: number }>>;
+      squares?: Partial<Record<string, SurfaceKey>>;
       pushParams?: Partial<PushParams>;
       camParams?: { height?: number; back?: number };
     } | null;
     if (saved) {
-      if (saved.version === STORE_VERSION && Array.isArray(saved.cars)) {
-        saved.cars.forEach((patch, i) => {
-          if (carList[i]) Object.assign(carList[i], patch);
-        });
+      if (saved.version === STORE_VERSION) {
+        if (Array.isArray(saved.cars)) {
+          saved.cars.forEach((patch, i) => {
+            if (carList[i]) Object.assign(carList[i], patch);
+          });
+        }
+        // Surface numbers and which square is made of what: both are tuning
+        // the user owns, so both come back.
+        for (const key of SURFACE_KEYS) {
+          Object.assign(SURFACES[key], saved.surfaces?.[key] ?? {});
+        }
+        for (const q of SQUARES) {
+          const savedKey = saved.squares?.[q];
+          if (savedKey && SURFACE_KEYS.includes(savedKey)) field.put(q, savedKey);
+        }
+        if (saved.squares?.base && SURFACE_KEYS.includes(saved.squares.base)) {
+          field.put('base', saved.squares.base);
+        }
+        repaintTerrain(terrainMeshes, field);
       }
       Object.assign(pushParams, saved.pushParams ?? {});
       Object.assign(camParams, saved.camParams ?? {});
@@ -86,11 +116,20 @@ export async function createProtoScene(game: Game): Promise<void> {
   function persist(): void {
     localStorage.setItem(
       STORE_KEY,
-      JSON.stringify({ version: STORE_VERSION, cars: carList, pushParams, camParams }),
+      JSON.stringify({
+        version: STORE_VERSION,
+        cars: carList,
+        surfaces: Object.fromEntries(
+          SURFACE_KEYS.map((k) => [k, { grip: SURFACES[k].grip, roll: SURFACES[k].roll }]),
+        ),
+        squares: field.squares,
+        pushParams,
+        camParams,
+      }),
     );
   }
 
-  const cars: Car[] = carList.map((p) => new Car(world, scene, p));
+  const cars: Car[] = carList.map((p) => new Car(world, scene, p, field));
   /** The Car being aimed at: camera, rules reads and the tuning panel's
    *  target. Tapping a Car in the scene selects it. */
   let active = 0;
@@ -121,11 +160,16 @@ export async function createProtoScene(game: Game): Promise<void> {
     }
   }
 
-  /** Bare concrete row (Test field): all facing +X, gaps `GRID_GAP` apart. */
+  /**
+   * Bare row for the Test field: all facing +X, gaps `GRID_GAP` apart, well
+   * inside ONE square (Asphalt) so every comparison starts on the same
+   * Surface — the whole point of hiding the Track is to feel one Surface
+   * against another, not to start arguing about where the row was standing.
+   */
   function placeTestRow(): void {
-    let x = 12.2;
+    let x = 15;
     for (const car of cars) {
-      car.reset(new THREE.Vector3(x, 0, 11), 0);
+      car.reset(new THREE.Vector3(x, 0, 5), 0);
       x += 2 * carHalfWidth(car.params) + GRID_GAP;
     }
   }
@@ -179,25 +223,43 @@ export async function createProtoScene(game: Game): Promise<void> {
     .name('Tune Car')
     .onChange((i: number) => setActive(Number(i)));
 
-  // Surfaces: presets of the grip values (sideFriction/rollFriction are the
-  // Surface — the distributed wheel friction makes them feel physical).
-  const SURFACES = {
-    'Rough concrete': { rollFriction: 0.05, sideFriction: 1.0, angularDamping: 0.3 },
-    'Smooth concrete': { rollFriction: 0.03, sideFriction: 0.7, angularDamping: 0.2 },
-    'Paved sidewalk': { rollFriction: 0.04, sideFriction: 0.8, angularDamping: 0.25 },
-    'Tiled balcony': { rollFriction: 0.02, sideFriction: 0.4, angularDamping: 0.12 },
-    'Ice (raw strikes)': { rollFriction: 0.005, sideFriction: 0.08, angularDamping: 0.03 },
-  } as const;
-  function applySurface(name: string): void {
-    Object.assign(carList[active], SURFACES[name as keyof typeof SURFACES]);
-    rebuildCar(active);
-    persist();
-    buildCarFolder();
+  // Surfaces are materials OF THE WORLD: each owns its share of the grip
+  // (× this Car's tires). They can be swapped between the four squares below,
+  // so any two can be compared along the same stretch of Track.
+  const surfaceFolder = gui.addFolder('Surfaces (the world)');
+  const surfaceOptions = Object.fromEntries(
+    SURFACE_KEYS.map((k) => [SURFACES[k].label, k]),
+  ) as Record<string, SurfaceKey>;
+  function buildSurfaceFolder(): void {
+    for (const c of [...surfaceFolder.children]) c.destroy();
+    for (const key of SURFACE_KEYS) {
+      const s = SURFACES[key];
+      const folder = surfaceFolder.addFolder(s.label);
+      // Roll ranges are ~1/10 of grip: grip decides g-force sideways, roll is
+      // the gentle drag of keeping the Car rolling.
+      folder.add(s, 'grip', 0.05, 1.5, 0.01).onFinishChange(persist);
+      folder.add(s, 'roll', 0.001, 0.12, 0.001).name('roll resistance').onFinishChange(persist);
+    }
+    for (const q of SQUARES) {
+      surfaceFolder
+        .add({ [q]: field.squares[q] }, q, surfaceOptions)
+        .name(SQUARE_LABELS[q])
+        .onChange((key: SurfaceKey) => {
+          field.put(q, key);
+          repaintTerrain(terrainMeshes, field);
+          persist();
+        });
+    }
+    surfaceFolder
+      .add({ base: field.squares.base }, 'base', surfaceOptions)
+      .name(SQUARE_LABELS.base)
+      .onChange((key: SurfaceKey) => {
+        field.put('base', key);
+        repaintTerrain(terrainMeshes, field);
+        persist();
+      });
   }
-  gui
-    .add({ surface: 'Smooth concrete' }, 'surface', Object.keys(SURFACES))
-    .name('Surface (this Car)')
-    .onChange(applySurface);
+  buildSurfaceFolder();
 
   const carFolder = gui.addFolder('Car (rebuilds)');
   function buildCarFolder(): void {
@@ -209,9 +271,14 @@ export async function createProtoScene(game: Game): Promise<void> {
     carFolder.add(p, 'mass', 0.3, 4, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
     carFolder.add(p, 'wheelRadius', 0.045, 0.13, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
     carFolder.add(p, 'wheelHalfWidth', 0.02, 0.05, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
-    carFolder.add(p, 'rollFriction', 0.005, 0.15, 0.005).onFinishChange(() => { rebuildCar(active); persist(); });
-    carFolder.add(p, 'sideFriction', 0.05, 1.5, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
-    carFolder.add(p, 'angularDamping', 0, 2, 0.05).onFinishChange(() => { rebuildCar(active); persist(); });
+    // Tires: this Car's HALF of the grip. The contact multiplies them with
+    // the Surface's (µ = surface.grip × tireGrip) — see ADR-0002.
+    carFolder.add(p, 'tireGrip', 0.1, 1.5, 0.05).name('tire grip (× Surface)')
+      .onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'tireRoll', 0.1, 3, 0.05).name('tire roll (× Surface)')
+      .onFinishChange(() => { rebuildCar(active); persist(); });
+    carFolder.add(p, 'angularDamping', 0, 2, 0.05).name('bearing damping (Car only)')
+      .onFinishChange(() => { rebuildCar(active); persist(); });
   }
   buildCarFolder();
   gui
@@ -264,7 +331,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     const pos = cars[i].position;
     const quat = cars[i].quaternion;
     cars[i].dispose();
-    cars[i] = new Car(world, scene, carList[i]);
+    cars[i] = new Car(world, scene, carList[i], field);
     cars[i].resetPose(pos, quat); // rebuild in place (tuning mid-race is fine)
     if (i === active) hud.setCarLabel(carList[i].name, carList[i].color);
   }
@@ -331,6 +398,13 @@ export async function createProtoScene(game: Game): Promise<void> {
     rules.update(dt);
 
     const car = getCar();
+    // Which Surface is under each wheel — the whole point of ticket 16 has to
+    // be watchable, not just true.
+    hud.setWheelSurfaces(
+      car
+        .wheelSurfaces()
+        .map((s) => (s ? { label: s.label, color: s.color } : { label: 'air', color: 0xffffff })),
+    );
     ring.position.set(car.position.x, terrainY(car.position.x, car.position.z) + 0.02, car.position.z);
     ring.scale.setScalar(carHalfWidth(car.params) + 0.07);
 
@@ -361,6 +435,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     placeOnTrack,
     placeTestRow,
     world,
+    field,
     track,
     rules,
     camera: game.camera,

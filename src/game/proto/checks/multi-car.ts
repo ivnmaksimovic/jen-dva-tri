@@ -12,7 +12,8 @@
  */
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { GRAVITY, initPhysics } from '../world.js';
+import { GRAVITY, buildTerrainPhysics, initPhysics } from '../world.js';
+import { SurfaceField, uniformAssignment } from '../surfaces.js';
 import { STARTING_GRID, Car, carHalfWidth, type CarParams } from '../car.js';
 
 const FRAME = 1 / 60; // one frame = 4 × 1/240 steps, same as the app
@@ -40,16 +41,17 @@ async function makeRig(params: CarParams[]): Promise<Rig> {
   world.timestep = 1 / 240;
   world.integrationParameters.numSolverIterations = 8;
 
-  // Flat ground. Its friction value is irrelevant to the Car: every Car
+  // The REAL Terrain (four squares, one raised 2 cm, the two ramps) with
+  // EVERY square made of Concrete: this check is about whether several bodies
+  // behave, not about which Surface they are on, and grip now comes from the
+  //Surface under each wheel — so one Surface everywhere is what isolates it.
+  // Its collider friction is irrelevant to the Car either way: every Car
   // collider is friction 0 with combine rule Min, so Rapier's contact
   // friction never applies — grip is applied by hand in Car.sync().
-  const ground = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
-  world.createCollider(
-    RAPIER.ColliderDesc.cuboid(40, 0.25, 40).setTranslation(0, -0.25, 0),
-    ground,
-  );
+  const field = new SurfaceField(uniformAssignment('concrete'));
+  buildTerrainPhysics(world, field);
 
-  const cars = params.map((p) => new Car(world, scene, p));
+  const cars = params.map((p) => new Car(world, scene, p, field));
   return { world, scene, cars };
 }
 
