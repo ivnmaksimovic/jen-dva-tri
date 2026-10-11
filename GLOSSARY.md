@@ -62,8 +62,19 @@ flip on it.
 What a wheel is standing on — concrete, asphalt, tiles, glass. Grip belongs
 to the *contact*, not to the Car: it is Surface × tire, read per wheel, every
 frame. A single Track crosses Surfaces (tiled balcony onto a concrete path),
-so two wheels of one Car can be on two Surfaces at once.
+so two wheels of one Car can be on two Surfaces at once. A Surface can carry
+**gravel** — stones lying in it that a wheel trips over (ticket 17).
 _Avoid_: material, ground, floor (a Surface is a thing with grip, not a colour)
+
+**Gravel** (Surface property):
+Stones set into a Surface, ~3 mm real across with ~1.2 mm standing proud,
+spread on a jittered lattice (`stones per square unit`, 0 = clean). Real
+objects the wheel rides over, not a claimed shape: whether the wheel is in the
+air decides whether it grips, so bad concrete emerges from the simulation
+instead of being authored. The interesting spacing is ~5 cm — wider and the
+wheel rolls between stones feeling nothing, finer and it rides their tops.
+Cost follows **coverage**, not density, so it ships inside the Track corridor.
+_Avoid_: roughness, bumps-written-into-materials, heightfield relief
 
 **Rock**:
 A solid white triangle obstacle. Touching it with even one wheel sends the

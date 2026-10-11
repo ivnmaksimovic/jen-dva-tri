@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import GUI from 'lil-gui';
 import RAPIER from '@dimforge/rapier3d-compat';
 import type { Game } from '../Game.js';
-import { buildEnvironment, GRAVITY, initPhysics, repaintTerrain, terrainY } from './world.js';
+import { buildEnvironment, GRAVITY, initPhysics, terrainY } from './world.js';
 import {
   SQUARES,
   SQUARE_LABELS,
@@ -62,8 +62,12 @@ export async function createProtoScene(game: Game): Promise<void> {
   // Surfaces: what each wheel stands on (ADR-0002 — grip is a property of the
   // contact, so this is World state, never Car state).
   const field = new SurfaceField();
-  const terrainMeshes = buildEnvironment(world, scene, field);
   const track = new Track(scene);
+  // Stones only go where a car can actually drive over them: on the Track. A
+  // whole square's worth costs milliseconds a frame and nobody ever rolls on
+  // the other 90% of it (see ticket 17 for the measured numbers).
+  const onTrack = (x: number, z: number): boolean => track.progressOf({ x, z }).dist < 2.2;
+  const { terrain, refresh: refreshTerrainView } = buildEnvironment(world, scene, field, onTrack);
 
   // --- Several Cars, each with its own params (ticket 12) ---
   const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5 };
@@ -75,13 +79,13 @@ export async function createProtoScene(game: Game): Promise<void> {
   const STORE_KEY = 'jdt-v0-tuning';
   // v3: grip moved off the Car onto the contact (Surface × tire, ticket 16),
   // so saved per-Car roll/side numbers are meaningless — v2 saves are dropped.
-  const STORE_VERSION = 3;
+  const STORE_VERSION = 4; // 4: Surface.rough (mm relief) is gone; it is gravel now
   const carList: CarParams[] = STARTING_GRID.map((p) => ({ ...p }));
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as {
       version?: number;
       cars?: Partial<CarParams>[];
-      surfaces?: Partial<Record<SurfaceKey, { grip?: number; roll?: number }>>;
+      surfaces?: Partial<Record<SurfaceKey, { grip?: number; roll?: number; gravel?: number }>>;
       squares?: Partial<Record<string, SurfaceKey>>;
       pushParams?: Partial<PushParams>;
       camParams?: { height?: number; back?: number };
@@ -105,7 +109,7 @@ export async function createProtoScene(game: Game): Promise<void> {
         if (saved.squares?.base && SURFACE_KEYS.includes(saved.squares.base)) {
           field.put('base', saved.squares.base);
         }
-        repaintTerrain(terrainMeshes, field);
+        refreshTerrainView();
       }
       Object.assign(pushParams, saved.pushParams ?? {});
       Object.assign(camParams, saved.camParams ?? {});
@@ -120,7 +124,10 @@ export async function createProtoScene(game: Game): Promise<void> {
         version: STORE_VERSION,
         cars: carList,
         surfaces: Object.fromEntries(
-          SURFACE_KEYS.map((k) => [k, { grip: SURFACES[k].grip, roll: SURFACES[k].roll }]),
+          SURFACE_KEYS.map((k) => [
+            k,
+            { grip: SURFACES[k].grip, roll: SURFACES[k].roll, gravel: SURFACES[k].gravel },
+          ]),
         ),
         squares: field.squares,
         pushParams,
@@ -239,6 +246,17 @@ export async function createProtoScene(game: Game): Promise<void> {
       // the gentle drag of keeping the Car rolling.
       folder.add(s, 'grip', 0.05, 1.5, 0.01).onFinishChange(persist);
       folder.add(s, 'roll', 0.001, 0.12, 0.001).name('roll resistance').onFinishChange(persist);
+      folder
+        .add(s, 'gravel', 0, 25, 1)
+        .name('gravel (stones/unit²)')
+        .onFinishChange(() => {
+          // Stones are objects in the world, not a property of the plane, so
+          // both the colliders and their meshes have to be rebuilt to change
+          // how many there are (the cost of that is measured in ticket 17).
+          terrain.reground();
+          refreshTerrainView();
+          persist();
+        });
     }
     for (const q of SQUARES) {
       surfaceFolder
@@ -246,7 +264,7 @@ export async function createProtoScene(game: Game): Promise<void> {
         .name(SQUARE_LABELS[q])
         .onChange((key: SurfaceKey) => {
           field.put(q, key);
-          repaintTerrain(terrainMeshes, field);
+          refreshTerrainView();
           persist();
         });
     }
@@ -255,7 +273,7 @@ export async function createProtoScene(game: Game): Promise<void> {
       .name(SQUARE_LABELS.base)
       .onChange((key: SurfaceKey) => {
         field.put('base', key);
-        repaintTerrain(terrainMeshes, field);
+        refreshTerrainView();
         persist();
       });
   }

@@ -44,17 +44,39 @@ export interface SurfaceDef {
   grip: number;
   /** Rolling resistance: how much it costs to keep rolling along heading. */
   roll: number;
+  /**
+   * Gravel: how many little stones lie embedded in one square unit of this
+   * Surface (0 = clean). Ticket 17's bet — whether a 1:64 wheel can be made to
+   * FEEL broken concrete — and the knob may end up deleted together with
+   * everything it touches.
+   */
+  gravel: number;
   /** Readout colour — the HUD names the Surface under each wheel in this. */
   color: number;
 }
 
 export const SURFACES: Record<SurfaceKey, SurfaceDef> = {
-  asphalt: { key: 'asphalt', label: 'Asphalt', grip: 1.0, roll: 0.05, color: 0x4a4d50 },
+  asphalt: { key: 'asphalt', label: 'Asphalt', grip: 1.0, roll: 0.05, gravel: 0, color: 0x4a4d50 },
   // The reference Surface: the numbers everything else was tuned against.
-  concrete: { key: 'concrete', label: 'Concrete', grip: 0.7, roll: 0.03, color: 0x8f9189 },
-  tiles: { key: 'tiles', label: 'Tiles', grip: 0.45, roll: 0.02, color: 0xc2a878 },
-  glass: { key: 'glass', label: 'Glass', grip: 0.18, roll: 0.008, color: 0x9fc6d8 },
+  concrete: { key: 'concrete', label: 'Concrete', grip: 0.7, roll: 0.03, gravel: 0, color: 0x8f9189 },
+  tiles: { key: 'tiles', label: 'Tiles', grip: 0.45, roll: 0.02, gravel: 0, color: 0xc2a878 },
+  glass: { key: 'glass', label: 'Glass', grip: 0.18, roll: 0.008, gravel: 0, color: 0x9fc6d8 },
 };
+
+/**
+ * How far a stone stands proud of the ground it is embedded in: 1.2 mm real.
+ * The interesting size here is the one a 1:64 wheel (6–10 mm radius) can trip
+ * on — much less and it is polish, much more and it is a kerb.
+ */
+export const STONE_TOP = 0.012;
+/** Stone radius, 3 mm real, before jitter. */
+export const STONE_RADIUS = 0.03;
+
+/** Deterministic 0..1 from two integers — same stones every run, no state. */
+export function hash01(i: number, j: number): number {
+  const s = Math.sin(i * 127.1 + j * 311.7) * 43758.5453;
+  return s - Math.floor(s);
+}
 
 /** The four squares of the test ground, plus everything outside them. */
 export type Square = 'nw' | 'ne' | 'sw' | 'se' | 'base';

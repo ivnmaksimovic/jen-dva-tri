@@ -2,7 +2,11 @@ import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import {
   SQUARES,
+  STONE_RADIUS,
+  STONE_TOP,
+  SURFACES,
   SURVEY_GROUP,
+  hash01,
   surfaceMaterial,
   type Square,
   type SurfaceField,
@@ -13,19 +17,18 @@ import {
  * World scale: 1 unit = 10 real centimetres (a 1:64 car is ~0.45 units long,
  * the sidewalk curb is 0.2 units = 2 cm). Gravity matches: 98.1 units/s².
  *
- * The Terrain is a TEST GROUND for Surfaces (ticket 16): the ground under the
- * Track is four joined squares, and one of them is raised as a sidewalk.
- * Which square is made of WHAT is decided by `SurfaceField` (swappable from
- * the GUI); which square is RAISED is a property of the place, not the paint.
+ * The Terrain is a TEST GROUND for Surfaces: the ground under the Track is four
+ * joined squares, and one of them is raised as a sidewalk. Which square is made
+ * of WHAT is decided by `SurfaceField` (swappable from the GUI); which square is
+ * RAISED is a property of the place, not the paint.
  *
  * There are two layers here, and the split is the point:
  *
- *   **What you roll on** (`groundPieces`) — one seamless flat slab, the raised
- *   square and its two ramps. ONE slab for all flat ground, because four slabs
- *   laid edge to edge gave every joint a vertical face, and a 1:64 wheel
- *   rolling over it met that face: it rode up 1 mm and lost half its speed in
- *   a single frame. Nothing about Surfaces needs those joints, so they are
- *   gone.
+ *   **What you roll on** (`groundPieces`, plus `stonesIn` for ticket 17) — one
+ *   seamless flat slab, the raised square and its two ramps, and whatever
+ *   stones a Surface carries. ONE slab for all flat ground, because four slabs
+ *   laid edge to edge gave every joint a vertical face, and a 1:64 wheel met
+ *   it: it rode up 1 mm and lost half its speed in a single frame.
  *
  *   **What you are standing on** (`surfacePads`) — one thin pad per square,
  *   asked about by a straight-down cast from each wheel, and collided with by
@@ -95,10 +98,20 @@ function spanOf(q: Exclude<Square, 'base'>): { x: [number, number]; z: [number, 
   };
 }
 
+/** Top of the flat ground inside a square ('base' is the world beyond them). */
 function surfaceHeight(q: Square): number {
   if (q === 'nw') return RAISED_TOP; // the raised one
   if (q === 'base') return -0.001; // everything beyond the four squares
   return 0;
+}
+
+/** Which square a point belongs to, or null outside all four. */
+function squareAt(x: number, z: number): Exclude<Square, 'base'> | null {
+  for (const q of SQUARES) {
+    const { x: sx, z: sz } = spanOf(q);
+    if (x >= sx[0] && x <= sx[1] && z >= sz[0] && z <= sz[1]) return q;
+  }
+  return null;
 }
 
 const SLAB_THICKNESS = 0.5;
@@ -106,13 +119,24 @@ const RAMP_THICKNESS = 0.06;
 /** Survey pads are thin: they only ever have to be found by a downward cast. */
 const PAD_THICKNESS = 0.02;
 
-/** One piece of the world: size, place, attitude, and what it is for. */
+/** One piece of the world: size, place, attitude, and which square it is. */
 export interface TerrainPiece {
   /** Which square's Surface this belongs to ('base' outside the four). */
   square: Square;
+  kind: 'slab' | 'ramp';
   size: [number, number, number];
   center: [number, number, number];
   rotation: THREE.Quaternion;
+}
+
+/** One stone embedded in a square's surface (ticket 17). */
+export interface Stone {
+  square: Square;
+  x: number;
+  z: number;
+  radius: number;
+  /** How far it stands proud of the surface it is set into. */
+  top: number;
 }
 
 /**
@@ -123,6 +147,7 @@ export function groundPieces(): TerrainPiece[] {
   const pieces: TerrainPiece[] = [
     {
       square: 'base',
+      kind: 'slab',
       size: [80, SLAB_THICKNESS, 80],
       center: [MEET_X, -SLAB_THICKNESS / 2, MEET_Z],
       rotation: new THREE.Quaternion(),
@@ -132,6 +157,7 @@ export function groundPieces(): TerrainPiece[] {
   const thickness = RAISED_TOP + 0.05;
   pieces.push({
     square: RAISED,
+    kind: 'slab',
     size: [raised.x[1] - raised.x[0], thickness, raised.z[1] - raised.z[0]],
     center: [
       (raised.x[0] + raised.x[1]) / 2,
@@ -145,6 +171,49 @@ export function groundPieces(): TerrainPiece[] {
 }
 
 /**
+ * Stones set into whichever squares carry gravel: a jittered lattice, so the
+ * spacing is even (no clumps, no bald patches) while every stone sits a little
+ * off its mark. Deterministic — the same world every run — and REAL GEOMETRY on
+ * purpose.
+ *
+ * Ticket 17 first tried making the rolling surface itself bumpy (a heightfield
+ * of millimetre relief) and that failed on its own measurement: a FLAT
+ * heightfield braked the Car exactly as much as a bumpy one, and 10% of probes
+ * found no collider beneath at all. Anything that cannot tell bumps apart from
+ * its own representation cannot answer the question, so relief left and stones
+ * came in — nothing claims the shape, a solid object just sits there.
+ */
+export function stonesIn(field: SurfaceField, keep?: (x: number, z: number) => boolean): Stone[] {
+  const stones: Stone[] = [];
+  for (const q of SQUARES) {
+    const density = SURFACES[field.squares[q]].gravel;
+    if (density <= 0) continue;
+    const { x, z } = spanOf(q);
+    const spacing = 1 / Math.sqrt(density);
+    const cols = Math.floor((x[1] - x[0]) / spacing);
+    const rows = Math.floor((z[1] - z[0]) / spacing);
+    for (let j = 0; j < cols; j++) {
+      for (let i = 0; i < rows; i++) {
+        const jitter = hash01(j * 7 + i, i * 13 + j);
+        const jitter2 = hash01(i * 31 + j, j * 17 + i);
+        const px = x[0] + (j + 0.15 + 0.7 * jitter) * spacing;
+        const pz = z[0] + (i + 0.15 + 0.7 * jitter2) * spacing;
+        // Off the Track nothing drives over it, so nothing pays for it.
+        if (keep && !keep(px, pz)) continue;
+        stones.push({
+          square: q,
+          x: px,
+          z: pz,
+          radius: STONE_RADIUS * (0.7 + 0.6 * jitter),
+          top: STONE_TOP * (0.6 + 0.8 * jitter2),
+        });
+      }
+    }
+  }
+  return stones;
+}
+
+/**
  * What a wheel is STANDING ON. One pad per square with EXACTLY the square's
  * footprint — nothing to collide with, so nothing to catch on. The base pad is
  * sunk 0.1 mm so that inside a square the answer is always that square, and
@@ -155,15 +224,15 @@ export function surfacePads(): TerrainPiece[] {
   for (const q of [...SQUARES, 'base' as Square]) {
     const span =
       q === 'base'
-        ? { x: [MEET_X - 40, MEET_X + 40] as [number, number], z: [MEET_Z - 40, MEET_Z + 40] as [number, number] }
+        ? {
+            x: [MEET_X - 40, MEET_X + 40] as [number, number],
+            z: [MEET_Z - 40, MEET_Z + 40] as [number, number],
+          }
         : spanOf(q);
     pads.push({
       square: q,
-      size: [
-        span.x[1] - span.x[0],
-        PAD_THICKNESS,
-        span.z[1] - span.z[0],
-      ],
+      kind: 'slab',
+      size: [span.x[1] - span.x[0], PAD_THICKNESS, span.z[1] - span.z[0]],
       center: [
         (span.x[0] + span.x[1]) / 2,
         surfaceHeight(q) - PAD_THICKNESS / 2,
@@ -175,18 +244,23 @@ export function surfacePads(): TerrainPiece[] {
   // A ramp is part of the raised square: standing on it is standing on tiles.
   for (const r of RAMPS) {
     const deck = rampDeck(r);
-    const flat: TerrainPiece = {
-      square: deck.square,
-      size: [deck.size[0], PAD_THICKNESS, deck.size[2]],
-      center: [...deck.center] as [number, number, number],
-      rotation: deck.rotation.clone(),
-    };
-    pads.push(liftToTopFace(flat, deck.size[1]));
+    pads.push(
+      liftToTopFace(
+        {
+          square: deck.square,
+          kind: 'slab',
+          size: [deck.size[0], PAD_THICKNESS, deck.size[2]],
+          center: [...deck.center] as [number, number, number],
+          rotation: deck.rotation.clone(),
+        },
+        deck.size[1],
+      ),
+    );
   }
   return pads;
 }
 
-/** Slide a thin piece down/up so its TOP FACE sits where the deck's does. */
+/** Slide a thin piece so its TOP FACE sits where the deck's does. */
 function liftToTopFace(piece: TerrainPiece, deckThickness: number): TerrainPiece {
   const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(piece.rotation);
   const center = new THREE.Vector3(...piece.center)
@@ -228,6 +302,7 @@ function rampDeck(piece: RampSpec): TerrainPiece {
 
   return {
     square: RAISED,
+    kind: 'ramp',
     size: piece.axis === 'x' ? [hyp, RAMP_THICKNESS, crossLen] : [crossLen, RAMP_THICKNESS, hyp],
     center: [center.x, center.y, center.z],
     rotation,
@@ -238,6 +313,9 @@ function rampDeck(piece: RampSpec): TerrainPiece {
  * Ground height at (x, z) — chalk drawing, checkpoint lines and the aim ring
  * all read this, so the drawing can never disagree with what the wheels roll
  * on. Analytic, and derived from the same numbers the pieces come from.
+ *
+ * It is the MEAN plane, deliberately: stones are things lying on the ground,
+ * not the ground's shape.
  */
 export function terrainY(x: number, z: number): number {
   // Ramps FIRST: they lie on top of whatever is beneath them, so asking the
@@ -251,16 +329,19 @@ export function terrainY(x: number, z: number): number {
     // Straight line from the low end (y = 0) up to the high end (raised).
     return (RAISED_TOP * (along - r.low)) / (r.high - r.low);
   }
-  for (const q of SQUARES) {
-    const { x: sx, z: sz } = spanOf(q);
-    if (x >= sx[0] && x <= sx[1] && z >= sz[0] && z <= sz[1]) return surfaceHeight(q);
-  }
-  return 0;
+  const square = squareAt(x, z);
+  return square ? surfaceHeight(square) : 0;
 }
 
 /** Environment membership: every Terrain collider a Car can actually touch. */
 const ENV_GROUP = 0x0001;
 const groups = (membership: number, filter: number): number => (membership << 16) | filter;
+
+/** Handle for the one thing in the world the GUI can reshape. */
+export interface TerrainHandle {
+  /** Rebuild everything a change of gravel can affect (called by the GUI). */
+  reground(): void;
+}
 
 /**
  * Physics only — no meshes, no textures, so it runs headlessly in Node
@@ -268,8 +349,15 @@ const groups = (membership: number, filter: number): number => (membership << 16
  * are tagged with their square, which is the whole answer to "what is under
  * this wheel?".
  */
-export function buildTerrainPhysics(world: RAPIER.World, field: SurfaceField): void {
-  const add = (p: TerrainPiece, square: Square, group: number, tag: boolean): void => {
+export function buildTerrainPhysics(
+  world: RAPIER.World,
+  field: SurfaceField,
+  keep?: (x: number, z: number) => boolean,
+): TerrainHandle {
+  /** Every body this built, so `reground` can replace exactly those. */
+  const built: RAPIER.RigidBody[] = [];
+
+  const addPiece = (p: TerrainPiece, square: Square, group: number, tag: boolean): void => {
     const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     body.setRotation({ x: p.rotation.x, y: p.rotation.y, z: p.rotation.z, w: p.rotation.w }, true);
     body.setTranslation({ x: p.center[0], y: p.center[1], z: p.center[2] }, true);
@@ -280,11 +368,45 @@ export function buildTerrainPhysics(world: RAPIER.World, field: SurfaceField): v
       body,
     );
     if (tag) field.tag(collider, square);
+    built.push(body);
   };
-  // Rolling surface: solid, collides with the Cars, expresses no material.
-  for (const p of groundPieces()) add(p, p.square, groups(ENV_GROUP, 0xffff), false);
-  // Standing-on surface: never collides, only answers casts.
-  for (const p of surfacePads()) add(p, p.square, groups(SURVEY_GROUP, SURVEY_GROUP), true);
+
+  /** One body per square carries its stones: many ball colliders, one object. */
+  const addStones = (): void => {
+    const bySquare = new Map<Square, Stone[]>();
+    for (const stone of stonesIn(field, keep)) {
+      const list = bySquare.get(stone.square) ?? [];
+      list.push(stone);
+      bySquare.set(stone.square, list);
+    }
+    for (const list of bySquare.values()) {
+      const body = world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+      for (const stone of list) {
+        world.createCollider(
+          RAPIER.ColliderDesc.ball(stone.radius)
+            .setTranslation(stone.x, stone.top - stone.radius, stone.z)
+            .setFriction(0.95)
+            .setCollisionGroups(groups(ENV_GROUP, 0xffff)),
+          body,
+        );
+      }
+      built.push(body);
+    }
+  };
+
+  const build = (): void => {
+    for (const body of [...built]) {
+      built.splice(built.indexOf(body), 1);
+      world.removeRigidBody(body);
+    }
+    // Rolling surface: solid, collides with the Cars, carries no material.
+    for (const p of groundPieces()) addPiece(p, p.square, groups(ENV_GROUP, 0xffff), false);
+    addStones();
+    // Standing-on surface: never collides, only answers casts.
+    for (const p of surfacePads()) addPiece(p, p.square, groups(SURVEY_GROUP, SURVEY_GROUP), true);
+  };
+  build();
+  return { reground: build };
 }
 
 /**
@@ -296,6 +418,7 @@ export function buildTerrainPhysics(world: RAPIER.World, field: SurfaceField): v
 export function buildTerrainMeshes(
   scene: THREE.Scene,
   field: SurfaceField,
+  keep?: (x: number, z: number) => boolean,
 ): Map<Square, THREE.Mesh[]> {
   const bySquare = new Map<Square, THREE.Mesh[]>();
   const addMesh = (p: TerrainPiece, square: Square): void => {
@@ -312,37 +435,113 @@ export function buildTerrainMeshes(
     bySquare.set(square, list);
   };
   for (const p of groundPieces()) addMesh(p, p.square);
-  // The paint: standing 0.1 mm proud of the solid ground so it never
-  // z-fights with it, and 0.1 mm is far below anything a 1:64 wheel can feel.
+  // Each square's own material, painted 0.1 mm proud of the solid ground so it
+  // never z-fights with it (and 0.1 mm is far below what a 1:64 wheel can
+  // feel). `userData.square` marks these so `refreshTerrain` can repaint them.
   for (const q of SQUARES) {
     const { x, z } = spanOf(q);
-    const top = surfaceHeight(q) + 0.001;
-    addMesh(
-      {
-        square: q,
-        size: [x[1] - x[0], 0.002, z[1] - z[0]],
-        center: [(x[0] + x[1]) / 2, top - 0.001, (z[0] + z[1]) / 2],
-        rotation: new THREE.Quaternion(),
-      },
-      q,
+    const mesh = new THREE.Mesh(
+      new THREE.BoxGeometry(x[1] - x[0], 0.002, z[1] - z[0]),
+      surfaceMaterial(field.squares[q]),
     );
+    mesh.position.set((x[0] + x[1]) / 2, surfaceHeight(q) + 0.001, (z[0] + z[1]) / 2);
+    mesh.receiveShadow = true;
+    mesh.userData.square = q;
+    scene.add(mesh);
+    const list = bySquare.get(q) ?? [];
+    list.push(mesh);
+    bySquare.set(q, list);
   }
+  addStoneMeshes(scene, field, bySquare, keep);
   return bySquare;
 }
 
-/** Repaint after the GUI moved Surfaces between squares. */
-export function repaintTerrain(meshes: Map<Square, THREE.Mesh[]>, field: SurfaceField): void {
+/**
+ * The stones, drawn as one instanced mesh per square — a busy dam asked for one
+ * draw call, not a thousand, and it is the same list the colliders were built
+ * from, so what you see is what you hit.
+ */
+function addStoneMeshes(
+  scene: THREE.Scene,
+  field: SurfaceField,
+  bySquare: Map<Square, THREE.Mesh[]>,
+  keep?: (x: number, z: number) => boolean,
+): void {
+  const perSquare = new Map<Square, Stone[]>();
+  for (const stone of stonesIn(field, keep)) {
+    const list = perSquare.get(stone.square) ?? [];
+    list.push(stone);
+    perSquare.set(stone.square, list);
+  }
+  for (const [square, list] of perSquare) {
+    if (list.length === 0) continue;
+    const mesh = new THREE.InstancedMesh(
+      new THREE.SphereGeometry(1, 8, 6),
+      surfaceMaterial(field.squares[square]),
+      list.length,
+    );
+    const m = new THREE.Matrix4();
+    list.forEach((stone, i) => {
+      m.makeScale(stone.radius, stone.radius, stone.radius);
+      m.setPosition(stone.x, stone.top - stone.radius, stone.z);
+      mesh.setMatrixAt(i, m);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.receiveShadow = true;
+    mesh.castShadow = true;
+    mesh.userData.stones = square;
+    scene.add(mesh);
+    const list2 = bySquare.get(square) ?? [];
+    list2.push(mesh);
+    bySquare.set(square, list2);
+  }
+}
+
+/** Bring every mesh back in line with the field after ANY change. */
+export function refreshTerrain(meshes: Map<Square, THREE.Mesh[]>, field: SurfaceField): void {
   for (const [square, list] of meshes) {
     for (const mesh of list) mesh.material = surfaceMaterial(field.squares[square]);
   }
 }
 
-/** The whole environment: physics plus its looks. Returns meshes per square. */
+/**
+ * Replace the stone meshes: their number can change, so unlike the slabs these
+ * cannot simply be repainted. One draw call per square either way.
+ */
+export function rebuildStoneMeshes(
+  scene: THREE.Scene,
+  meshes: Map<Square, THREE.Mesh[]>,
+  field: SurfaceField,
+  keep?: (x: number, z: number) => boolean,
+): void {
+  for (const [square, list] of [...meshes]) {
+    const survivors = list.filter((mesh) => {
+      if (mesh.userData.stones === undefined) return true;
+      scene.remove(mesh);
+      (mesh as THREE.InstancedMesh).dispose();
+      return false;
+    });
+    meshes.set(square, survivors);
+  }
+  addStoneMeshes(scene, field, meshes, keep);
+}
+
+/** The whole environment: physics plus its looks, and the handle to reshape it. */
 export function buildEnvironment(
   world: RAPIER.World,
   scene: THREE.Scene,
   field: SurfaceField,
-): Map<Square, THREE.Mesh[]> {
-  buildTerrainPhysics(world, field);
-  return buildTerrainMeshes(scene, field);
+  keep?: (x: number, z: number) => boolean,
+): { terrain: TerrainHandle; terrainMeshes: Map<Square, THREE.Mesh[]>; refresh(): void } {
+  const terrain = buildTerrainPhysics(world, field, keep);
+  const terrainMeshes = buildTerrainMeshes(scene, field, keep);
+  return {
+    terrain,
+    terrainMeshes,
+    /** After the GUI moved Surfaces, or changed how much gravel they carry. */
+    refresh(): void {
+      refreshTerrain(terrainMeshes, field);
+      rebuildStoneMeshes(scene, terrainMeshes, field, keep);
+    },
+  };
 }

@@ -215,6 +215,25 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   straddling the height step drew half of it buried), and the Test-field row
   now starts inside ONE square, so comparisons start on the same Surface.
 
+- Ticket 17 (roughness bet, **RESOLVED 2026-10-10 — ships limited**): bumpy
+  ground IS felt by 1:64 wheels (38 mm → 10 mm rolled, wheels airborne on 9 of
+  420 frames), but the first implementation did not prove it: making the
+  rolling surface itself bumpy (a heightfield of mm relief) braked the Car
+  **just as much when geometrically flat** as when bumpy — a control run at
+  ±0.0001 mm was indistinguishable from ±2 mm at every grid spacing tried, and
+  10% of downward probes found NO collider over the heightfield at all. So the
+  effect was the representation, not the bumps; it is deleted. What ships
+  instead is **gravel**: real stones (~3 mm radius, ~1.2 mm proud) lying in the
+  Surface, and nothing anywhere claims a shape. Two surprises worth carrying
+  forward: **always measure the flat control first**, and the effect is NOT
+  monotonic — 1 stone/unit² does nothing, ~4/unit² (5 cm spacing) is where a
+  6–10 mm wheel can no longer go around a stone, and finer than that it rides
+  the tops and feels smoother again. Cost is the second half: ~0.45 ms per
+  frame per thousand stones (desktop), so it is confined to the Track corridor
+  (+0.6 ms for 1344 stones) and a whole-Surface version is unaffordable, while
+  a bounded bad spot (69 stones) costs nothing measurable. Whether it FEELS
+  right is the user's call on the phone.
+
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
 passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), several
 Cars on the Track (ticket 12, RESOLVED 2026-10-09), and now spatial Surfaces
@@ -231,10 +250,11 @@ tuning before being treated as physics (see the tuning LESSON above).
 ## Roadmap (what's next)
 
 1. **Feel tuning** (current phase — USER-held, not an agent task) — the
-   user dials in Surfaces (GUI → `Surfaces (the world)`) and tire params on
-   their phone; tuning persists per browser (lil-gui → localStorage, now v3:
-   per-Car roll/side numbers no longer exist). Agents: physics feel numbers
-   are the user's domain.
+   user dials in Surfaces (GUI → `Surfaces (the world)`, including each
+   Surface's `gravel`) and tire params on
+   their phone; tuning persists per browser (lil-gui → localStorage, now v4:
+   per-Car roll/side numbers no longer exist, Surface `rough` is gravel now).
+   Agents: physics feel numbers are the user's domain.
 2. **Push-the-phone** — the user's main-bet control scheme: ticket 13 (open)
    — build it per the settled design in ticket 07. HTTPS dev server already
    in place.
