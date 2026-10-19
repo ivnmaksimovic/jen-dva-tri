@@ -12,7 +12,8 @@
     "check:cars": "node scripts/headless-check.mjs src/game/proto/checks/multi-car.ts",
     "check:surfaces": "node scripts/headless-check.mjs src/game/proto/checks/surfaces.ts",
     "check:gesture": "node scripts/headless-check.mjs src/game/proto/checks/gesture.ts",
-    "check:roughness": "node scripts/headless-check.mjs src/game/proto/checks/roughness.ts"
+    "check:roughness": "node scripts/headless-check.mjs src/game/proto/checks/roughness.ts",
+    "check:finger": "node scripts/headless-check.mjs src/game/proto/checks/finger.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",
