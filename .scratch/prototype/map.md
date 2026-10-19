@@ -274,6 +274,32 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   - Feedback: **strike point visible ~2 s after the hit** is normal player
     feedback (with no aiming pause it is the only thing that teaches); the
     synthetic aim arrow stays debug-only, as in the slingshot.
+- Ticket 18 step 1 (**the headless spike**) landed and is COMMITTED — `check:finger`
+  + `src/game/proto/finger.ts`. Findings worth carrying:
+  - **The finger is a SERVO (finite mass, bounded acceleration), not a kinematic
+    body — that was a measurement, not a taste.** Kinematic (infinite mass +
+    hard stop at the surface) does not strike: it follows the Car along its
+    whole follow-through and drags it metres sideways. The servo version loses
+    ground when it hits something, which is what ends a strike. Both models are
+    kept in `finger.ts` so the comparison can be re-run.
+  - **Strength follows how fast the finger ARRIVES, not how fast the swipe is.**
+    √(2·maxAccel·run-up) decides it: over 6 cm of run-up the finger cAPS out at
+    12.4 u/s however hard the swipe. Measured transfer: arrival 2.5/8.1/24.8
+    u/s → 27/109/374 cm rolled (today's impulse 2/4/6 → 10/39/86 cm).
+  - **OPEN: the heading is deterministic but knife-edge** — a centred flick
+    leaves +2° to -18° depending only on the run-up, and finger width (0.4–2.4
+    cm) does not explain it. User judgement next: real scatter, or too random
+    to aim with.
+  - **OPEN: at 24.8 u/s the finger punches 7 mm deep against a 1 mm budget**
+    (soft guard reacts a step late; the kinematic path already has the
+    predictive `castAhead` that would fix it).
+  - Side finding, NOT this ticket's problem: **today's model already explodes at
+    impulse 16** (Car ends up at y = -5 170 m). High-energy strikes are unsafe
+    in the existing Car too.
+  - Reusable technique added: `Finger.contactReport()` reports every solver
+    contact point, its normal and its impulse — how you AUDIT where a strike
+    landed instead of believing where you aimed.
+
 - Ticket 19 — **the camera is now controllable** (deliberately small grilling
   ticket). The early "fixed near-top view" decision is **VOID — the user does
   not care about it**: early testing showed everyone expects zoom/rotate/pan,

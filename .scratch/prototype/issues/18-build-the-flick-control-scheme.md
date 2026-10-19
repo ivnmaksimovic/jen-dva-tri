@@ -135,6 +135,55 @@ Testers expect pinch-zoom and rotate (ticket 19 exists because of that).
 - The user can tune it: gesture window, cuboid half-extents, max penetration,
   strength scaling if any — all exposed, none tuned by an agent.
 
+## What the headless spike found (`check:finger`, 2026-10-19 — step 1 done)
+
+The check runs the REAL Car, the REAL world and a synthetic swipe, and prints
+roll distance, contact steps, deepest penetration and where the impulse landed.
+Read it before touching the numbers: `pnpm check:finger` (add `JDT_TRACE=1` for
+a per-step trace of one strike).
+
+**Mechanics work, and cost nothing.** Transfer rises with how fast the finger
+actually ARRIVES: 2.5 / 8.1 / 24.8 u/s → 27 / 109 / 374 cm rolled, against
+today's slingshot impulse of 2/4/6 → 10 / 39 / 86 cm. Nothing launches (hop
+under 2 mm), every Car settles afterwards, and a driven finger costs 0.19 ms per
+frame against 0.12 ms without one. **No prior fixing known needed.**
+
+**Why the finger is a SERVO, not a kinematic body — measured, not assumed.**
+`src/game/proto/finger.ts` keeps both. The kinematic version (infinite mass,
+hard stop at the surface) does not strike: with nothing to pay it follows the
+Car along the whole follow-through, dragging it 3 m and a metre sideways with
+it. The servo — a dynamic body of bounded mass (`massFactor`, default 5× the
+aimed Car) and bounded acceleration (`maxAccel`, default 30 m/s²) chasing the
+touch point — loses ground when it hits something, so a flick pays out momentum
+and stops while a slow sweep keeps pressing. That difference IS riding, and it
+comes out of the model rather than being enforced.
+
+**Two things it pays to know before tuning anything:**
+
+- **Arrival speed is the strength, not swipe speed.** The finger starts at rest
+  and is cap-limited, so √(2·maxAccel·run-up) decides how fast it actually
+  lands: over 6 cm of run-up it could not exceed 12.4 u/s whatever the swipe.
+  `maxAccel` is the strength knob (`massFactor` barely moves it: 2/5/20 × the
+  Car → takeoff 12.8/14.2/15.2). Both are the user's numbers.
+- Side fact worth carrying, unrelated to this ticket: **today's model already
+  explodes at impulse 16** (the Car ends at y = -5 170 m). Found while building
+  a reference table; nothing here depends on it, but high-energy strikes are not
+  safe territory in the existing Car either.
+
+**OPEN — the heading is a knife-edge.** A dead-centre flick leaves anywhere from
++2° to -18° depending on the run-up, deterministically (the same inputs give the
+same answer every time) and independent of how wide the knuckle is (0.4–2.4 cm
+tested). The linear transfer is solid; the ANGULAR one is not. Whether this is
+"real scatter, like a finger on a 1:64 Car" or "too random to aim with" is a
+USER judgement, and it is the first thing to look at next — candidates to test:
+letting the fingertip be compliant (bigger `maxPenetration`, contact skin),
+stiffening the servo sideways, or deciding the scatter is part of the game.
+
+**OPEN — the clamp leaks at speed.** At 24.8 u/s arrival the finger punched
+7 mm into the Car against a 1 mm budget; the soft guard reacts a step too late.
+Predicting the step (as the kinematic path already does with `castAhead`) should
+close it, and is the obvious next build step.
+
 Note this ticket carries **no go/no-go verdict** (unlike ticket 13's role): the
 user has already decided C stays, so what remains is tuning and experimenting,
 not judging.
