@@ -30,9 +30,13 @@ The v1 (real game) roadmap is parked at `.scratch/v1/spec.md` (coarse: only
 verdict + two grilling tickets + the core prefactor are ticketed).
 **Physical world note:** grip is f(tire, Surface) resolved per wheel contact —
 see ADR-0002.
-**Next up: the push-the-phone control scheme** (phone on a surface, pushed
-like the car; motion sensors capture the Push — ticket 13) — full design in
-`.scratch/prototype/issues/07-phone-push-mapping.md`.
+**Controls: three schemes, all intended to ship as selectable options.**
+Slingshot (A, built) — push-the-phone (B, ticket 13, full design in
+`.scratch/prototype/issues/07-phone-push-mapping.md`) — **the flick (C,
+ticket 18, the likely v1 default)**: sweep a finger through the Car and a real
+finger-shaped collider delivers the Push. The camera became user-controllable
+(zoom/rotate/pan, one finger = the game, two fingers = the camera) —
+see ticket 19.
 
 ## Where things live
 

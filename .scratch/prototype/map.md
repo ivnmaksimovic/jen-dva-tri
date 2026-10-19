@@ -251,6 +251,40 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   a bounded bad spot (69 stones) costs nothing measurable. Whether it FEELS
   right is the user's call on the phone.
 
+- Ticket 18 — **the flick control scheme (option C)**, grilled 2026-10-19 over
+  6 rounds; the ticket holds everything. The decisions that matter most:
+  - **The Push is a REAL CONTACT, not a computed impulse.** The finger is a
+    kinematic horizontal cuboid (the middle knuckle; all half-extents tunable)
+    driven by the touch, collision-filtered so **only the aimed Car sees it**,
+    and **clamped at the contact** so it cannot pass through the Car. Infinite
+    effective mass is honest here (a real finger vastly outweighs a 1:64 Car);
+    the clamp is what prevents a shove-through, not a mass fudge. It also gives
+    the multi-impulse "slow, then accelerate within the window" Push for free
+    — never write an "impulses per window" mechanism.
+  - **A gesture is one sweep:** touch anywhere → move → a Push happens iff the
+    finger reaches the aimed Car; touching down ON the Car does nothing (same
+    reason the slingshot must enter from outside); **selection is tap-only** —
+    a flick never changes it and never touches another Car; extra fingers are
+    ignored; pointer capture so running off the glass mid-sweep still counts.
+  - **Riding is not auto-corrected.** Exceeding the ~300 ms window (one shared
+    number with scheme B; it now starts at the first solver contact, which the
+    finger body gives for free) is only **measured and shown** — no penalty, no
+    refusal, because the real game works that way: other players flag it. What
+    riding COSTS is a v1 rules question.
+  - Feedback: **strike point visible ~2 s after the hit** is normal player
+    feedback (with no aiming pause it is the only thing that teaches); the
+    synthetic aim arrow stays debug-only, as in the slingshot.
+- Ticket 19 — **the camera is now controllable** (deliberately small grilling
+  ticket). The early "fixed near-top view" decision is **VOID — the user does
+  not care about it**: early testing showed everyone expects zoom/rotate/pan,
+  including the user. Default stays the birdseye that follows the aimed Car;
+  **the first manual gesture turns follow off, Recentre restores it**;
+  zoom/rotate are offsets that survive pushing; **Recentre = default birdseye
+  framing over the selected Car** (the same thing as "last pushed", since
+  selection follows the pushed Car). **Conflict rule for every scheme: one
+  finger = the game, two fingers = the camera.** Push-the-phone (B) keeps its
+  own behind-the-Car camera.
+
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
 passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), several
 Cars on the Track (ticket 12, RESOLVED 2026-10-09), and now spatial Surfaces
@@ -276,6 +310,11 @@ tuning before being treated as physics (see the tuning LESSON above).
    — build it per the settled design in ticket 07. HTTPS dev server already
    in place.
 
+   **The camera is open too** (ticket 19, deliberately small): it becomes
+   user-controllable (zoom/rotate/pan) with the birdseye as default. It is a
+   camera MODEL question, so it is not folded into the flick ticket — only the
+   one-finger/two-finger conflict rule lives there.
+
    **But first: more experiments.** The user wants these in the prototype
    before push-the-phone (all open, unblocked, user-relevant):
 
@@ -297,7 +336,10 @@ tuning before being treated as physics (see the tuning LESSON above).
 
    Ordering note: 11, 12 and 16 are done, so the frontier scan now picks 17
    (roughness). Say the word if push-the-phone should jump ahead.
-3. **Flick** — maybe, much later (ticket 01).
+3. **Flick (option C)** — the third control scheme, ticket 18 (open,
+   unblocked). Grilled and ready to build; ordering vs push-the-phone is the
+   user's call. In v1 it is the likely **default**, with A and B both kept
+   selectable.
 4. **v1: stop throwing away** — once the controls feel right, grill the
    real game's design (multiplayer rules: car-to-car contact, turn order,
    race start, the penalise mode, Mines; Track Building / track editor;
