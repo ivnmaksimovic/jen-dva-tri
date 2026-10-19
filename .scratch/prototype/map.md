@@ -283,7 +283,7 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
     ground when it hits something, which is what ends a strike. Both models are
     kept in `finger.ts` so the comparison can be re-run.
   - **Strength follows how fast the finger ARRIVES, not how fast the swipe is.**
-    √(2·maxAccel·run-up) decides it: over 6 cm of run-up the finger cAPS out at
+    √(2·maxAccel·run-up) decides it: over 6 cm of run-up the finger caps out at
     12.4 u/s however hard the swipe. Measured transfer: arrival 2.5/8.1/24.8
     u/s → 27/109/374 cm rolled (today's impulse 2/4/6 → 10/39/86 cm).
   - **OPEN: the heading is deterministic but knife-edge** — a centred flick

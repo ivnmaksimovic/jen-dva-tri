@@ -146,7 +146,7 @@ a per-step trace of one strike).
 actually ARRIVES: 2.5 / 8.1 / 24.8 u/s → 27 / 109 / 374 cm rolled, against
 today's slingshot impulse of 2/4/6 → 10 / 39 / 86 cm. Nothing launches (hop
 under 2 mm), every Car settles afterwards, and a driven finger costs 0.19 ms per
-frame against 0.12 ms without one. **No prior fixing known needed.**
+frame against 0.12 ms without one. Nothing about the Car had to change.
 
 **Why the finger is a SERVO, not a kinematic body — measured, not assumed.**
 `src/game/proto/finger.ts` keeps both. The kinematic version (infinite mass,
