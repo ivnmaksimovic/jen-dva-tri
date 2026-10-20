@@ -22,6 +22,7 @@ import { GRAVITY, buildTerrainPhysics, initPhysics, terrainY } from '../world.js
 import { SurfaceField, uniformAssignment } from '../surfaces.js';
 import { Car, STARTING_GRID } from '../car.js';
 import { DEFAULT_FLICK_PARAMS } from '../flick.js';
+import { CameraRig, DEFAULT_CAMERA_PARAMS } from '../camera.js';
 
 const FRAME = 1 / 60; // one frame = 4 × 1/240 steps, same as the app
 const VIEW = { w: 900, h: 1600 }; // portrait phone — the target device
@@ -94,6 +95,8 @@ interface Rig {
   active: number;
   /** Which scheme is listening — the GUI's switch, live. */
   flickOn: boolean;
+  /** The camera RIG (not the Three camera): two fingers belong to it. */
+  cam: CameraRig;
 }
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
@@ -109,6 +112,7 @@ function frame(rig: Rig, frames = 1): void {
       rig.world.step();
     }
     for (const car of rig.cars) car.sync(FRAME);
+    rig.cam.update(FRAME, rig.cars[rig.active].position);
   }
 }
 
@@ -155,7 +159,7 @@ async function makeRig(): Promise<Rig> {
   cars.forEach((car, i) => car.reset(new THREE.Vector3(spots[i][0], terrainY(...spots[i]), spots[i][1]), 0));
 
   const el = new PointerTarget();
-  const rig: Rig = {
+  const rig = {
     world,
     scene,
     camera,
@@ -168,7 +172,7 @@ async function makeRig(): Promise<Rig> {
     picked: [],
     active: 0,
     flickOn: true,
-  };
+  } as unknown as Rig;
   const host = {
     scene,
     camera,
@@ -217,6 +221,12 @@ async function makeRig(): Promise<Rig> {
     (id: number) => claim(id, rig.owner),
     () => release(rig.owner),
   );
+
+  // The camera rides the same canvas (ticket 19). Two fingers are ITS claim,
+  // and when it claims, whatever the game thought it owned has to be released.
+  rig.cam = new CameraRig(host, { ...DEFAULT_CAMERA_PARAMS }, (ids) => {
+    for (const id of ids) rig.el.fire('pointercancel', 0, 0, id);
+  });
 
   frame(rig, 2); // Rapier's query pipeline fills on the first step
   return rig;
@@ -378,6 +388,52 @@ async function check7_tapStillSelectsInFlickMode(): Promise<void> {
   );
 }
 
+/**
+ * 8. Two fingers are the camera's, always (ticket 19). It has to be able to
+ *    take the canvas mid-gesture: a pinch aimed at the view must not also drag
+ *    the Car the first finger happened to have started on.
+ */
+async function check8_cameraClaimsTwoFingers(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  syncView(rig);
+  const a = screenOf(rig, rig.cars[0].position.clone().add(new THREE.Vector3(-0.7, 0, 0)));
+  const b = screenOf(rig, rig.cars[0].position.clone().add(new THREE.Vector3(0.7, 0, 0)));
+  rig.el.fire('pointerdown', a.x, a.y, 1);
+  frame(rig, 2);
+  // Second finger down: the camera takes it and the flick must be dropped.
+  rig.el.fire('pointerdown', b.x, b.y, 2);
+  const cancelled = rig.pushed === 0 && !rig.cam.params.following;
+  for (let i = 1; i <= 12; i++) {
+    // Sweep the FIRST finger through the Car anyway, as a pinch would drag it.
+    rig.el.fire('pointermove', a.x + ((b.x - a.x) * i) / 12, a.y + ((b.y - a.y) * i) / 12, 1);
+    frame(rig, 1);
+  }
+  rig.el.fire('pointerup', b.x, b.y, 1);
+  frame(rig, 180);
+  record(
+    'two fingers claim the canvas for the camera and the game gesture is dropped',
+    cancelled && rig.pushed === 0,
+    `Pushes ${rig.pushed}, camera took over: ${cancelled}, following again: ${rig.cam.params.following}`,
+  );
+}
+
+/**
+ * 9. And afterwards the canvas goes back: one finger still Pushes. A camera
+ *    gesteasure that left the game permanently deaf would be worse than none.
+ */
+async function check9_oneFingerStillPushesAfterwards(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  swipeThrough(rig, rig.cars[0]);
+  frame(rig, 180);
+  record(
+    'after a camera gesture, one finger still Pushes',
+    rig.pushed === 1,
+    `Pushes ${rig.pushed}, refusals [${rig.refused.join('; ')}]`,
+  );
+}
+
 export async function run(): Promise<boolean> {
   console.log('the flick — its rules, driven through real events (ticket 18)\n');
   await check1_swipeStillPushes();
@@ -387,6 +443,8 @@ export async function run(): Promise<boolean> {
   await check5_theOtherSchemeStaysDeaf();
   await check6_noLiesFromTheIdleScheme();
   await check7_tapStillSelectsInFlickMode();
+  await check8_cameraClaimsTwoFingers();
+  await check9_oneFingerStillPushesAfterwards();
   const failed = results.filter((r) => !r.ok).length;
   console.log(
     `\n${results.length - failed}/${results.length} checks passed` +

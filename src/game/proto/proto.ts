@@ -15,6 +15,7 @@ import { Track } from './track.js';
 import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from './car.js';
 import { setupSlingshot, type PushParams } from './slingshot.js';
 import { setupFlick, DEFAULT_FLICK_PARAMS, MARKER_LINGER, type FlickParams } from './flick.js';
+import { CameraRig, DEFAULT_CAMERA_PARAMS, type CameraParams } from './camera.js';
 import { Rules, START_S } from './rules.js';
 import { createHud } from './hud.js';
 
@@ -72,7 +73,7 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Several Cars, each with its own params (ticket 12) ---
   const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5 };
-  const camParams = { height: 5.2, back: 1.8, follow: 5 };
+  const camParams: CameraParams = { ...DEFAULT_CAMERA_PARAMS };
   // Which control scheme is live. Both input layers listen to the same canvas,
   // so exactly one must be deaf at a time — see `schemeActive()` below.
   const flickParams: FlickParams = { ...DEFAULT_FLICK_PARAMS };
@@ -320,8 +321,22 @@ export async function createProtoScene(game: Game): Promise<void> {
     releaseGesture,
   );
 
-  // --- Camera: follows the Car, fixed heading, near top-down ---
-  const camTarget = new THREE.Vector3();
+  // --- Camera: follows the Car until the player takes it (ticket 19) ---
+  /**
+   * The camera is the player's now (ticket 19): two fingers zoom, rotate and
+   * pan it. When that gesture starts it claims the canvas, so whichever Push
+   * scheme thought it owned the touch is told to drop it — otherwise a pinch
+   * aimed at the view would also start dragging a Car.
+   */
+  function cancelGameGestures(ids: number[]): void {
+    for (const id of ids) {
+      const el = game.renderer.domElement;
+      const evt = new PointerEvent('pointercancel', { pointerId: id });
+      el.dispatchEvent(evt);
+    }
+  }
+  const cameraRig = new CameraRig(game, camParams, cancelGameGestures);
+
   game.camera.position.set(track.pointAt(START_S).x, camParams.height, 2);
 
   // --- Tuning panel ---
@@ -470,8 +485,22 @@ export async function createProtoScene(game: Game): Promise<void> {
   gui.add(fieldState, 'testField').onChange(setTestField);
 
   const camFolder = gui.addFolder('Camera');
-  camFolder.add(camParams, 'height', 2, 14, 0.1).onFinishChange(persist);
-  camFolder.add(camParams, 'back', 0, 8, 0.1).onFinishChange(persist);
+  camFolder.add(camParams, 'height', 2, 14, 0.1).name('default height').onFinishChange(persist);
+  camFolder.add(camParams, 'back', 0, 8, 0.1).name('default back').onFinishChange(persist);
+  camFolder.add(camParams, 'follow', 0, 12, 0.5).name('follow rate').onFinishChange(persist);
+  camFolder.add(camParams, 'zoom', 0.4, 2.5, 0.01).name('zoom').onFinishChange(persist);
+  camFolder.add(camParams, 'following').name('follow aimed Car').onFinishChange(persist);
+  camFolder
+    .add(
+      {
+        recentre: () => {
+          cameraRig.recentre(getCar().position);
+          persist();
+        },
+      },
+      'recentre',
+    )
+    .name('Recentre on selected Car');
 
   gui
     .add({ resetTuning: () => {
@@ -572,16 +601,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     ring.position.set(car.position.x, terrainY(car.position.x, car.position.z) + 0.02, car.position.z);
     ring.scale.setScalar(carHalfWidth(car.params) + 0.07);
 
-    const p = car.position;
-    camTarget.set(p.x, p.y, p.z);
-    const k = 1 - Math.exp(-camParams.follow * dt);
-    const desired = new THREE.Vector3(
-      p.x,
-      p.y + camParams.height,
-      p.z + camParams.back, // fixed world heading — map stays oriented, car turns
-    );
-    game.camera.position.lerp(desired, k);
-    game.camera.lookAt(camTarget);
+    cameraRig.update(dt, car.position);
   });
 
   // Debug handle for the phone's remote console / tests (throwaway code).

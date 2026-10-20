@@ -354,6 +354,11 @@ export class Finger {
     const current = new THREE.Vector3(v.x, v.y, v.z);
     const accel = move.clone().divideScalar(dt).sub(current).divideScalar(dt);
 
+    // No passing through: once it has sunk to its budget, stop adding anything
+    // ALONG the strike. It may still press sideways, which is how a Car is
+    // turned rather than launched. (A predictive version using `castAhead` was
+    // tried and backed out: see the ticket — it cut every transfer to a fifth
+    // and brought the heading scatter back, and it was not what was tested.)
     const overlap = this.pressure();
     if (overlap > this.params.maxPenetration) {
       const inward = accel.dot(this.heading);
