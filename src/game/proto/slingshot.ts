@@ -83,6 +83,13 @@ export function setupSlingshot(
   onPush: () => void,
   onRefused: (reason: string) => void,
   canPush: () => boolean,
+  /**
+   * Gesture arbitration with the flick (both listen to the same canvas): a
+   * touch belongs to whichever layer claims it first. Without this, a gesture
+   * the OTHER scheme decided to ignore would still be heard here.
+   */
+  claimGesture?: (pointerId: number) => boolean,
+  releaseGesture?: () => void,
 ): void {
   const raycaster = new THREE.Raycaster();
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // ground plane y=0
@@ -132,6 +139,7 @@ export function setupSlingshot(
   game.scene.add(marker);
 
   let dragging = false;
+  let ownerId = -1;
   let contact = new THREE.Vector3();
   let start = new THREE.Vector3();
   let dragVec = new THREE.Vector3();
@@ -205,24 +213,26 @@ export function setupSlingshot(
     return best;
   }
 
-  el.addEventListener('pointerdown', (e) => {
+  /** @returns whether this gesture is now an aim (i.e. may keep the claim). */
+  function beginAim(e: PointerEvent): boolean {
     const hit = carHit(e);
-    if (!hit) return; // touched bare ground — nothing to aim at
+    if (!hit) return false; // touched bare ground — nothing to aim at
     // The touched Car becomes the aimed one (camera, Turn budget and the
     // tuning panel all follow it).
     onPick(hit.car);
     const car = getCar();
     if (!car.atRest()) {
       onRefused(`${car.params.name} must be at rest before the next Push`);
-      return;
+      return false;
     }
     if (!canPush()) {
       onRefused(`Turn over — ${car.params.name} is out of Pushes (Next Turn)`);
-      return;
+      return false;
     }
     const g = groundPoint(e);
-    if (!g) return;
+    if (!g) return false;
     dragging = true;
+    ownerId = e.pointerId;
     // A finger strikes the outer frame, never the middle — clamp the hit.
     contact = car.clampToFrame(hit.point);
     start = g;
@@ -242,10 +252,19 @@ export function setupSlingshot(
     } catch {
       // Some synthetic/edge-case pointers can't be captured; drag still works.
     }
+    return true;
+  }
+
+  el.addEventListener('pointerdown', (e) => {
+    if (claimGesture && !claimGesture(e.pointerId)) return; // another layer owns it
+    // Claim, then decide: if this touch is not an aim the claim has to go back,
+    // or the other scheme stays deaf for the rest of the gesture.
+    if (!beginAim(e)) releaseGesture?.();
   });
 
   el.addEventListener('pointermove', (e) => {
     if (!dragging) return;
+    if (claimGesture && e.pointerId !== ownerId) return;
     const g = groundPoint(e);
     if (!g) return;
     dragVec = g.clone().sub(start);
@@ -267,6 +286,7 @@ export function setupSlingshot(
   function finish(): void {
     if (!dragging) return;
     dragging = false;
+    releaseGesture?.();
     arrow.visible = false;
     marker.visible = false;
     const len = dragVec.length();
@@ -292,6 +312,7 @@ export function setupSlingshot(
   el.addEventListener('pointerup', finish);
   el.addEventListener('pointercancel', () => {
     dragging = false;
+    releaseGesture?.();
     dragVec.set(0, 0, 0);
     arrow.visible = false;
     marker.visible = false;

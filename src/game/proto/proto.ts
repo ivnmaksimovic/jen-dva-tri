@@ -14,6 +14,7 @@ import {
 import { Track } from './track.js';
 import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from './car.js';
 import { setupSlingshot, type PushParams } from './slingshot.js';
+import { setupFlick, DEFAULT_FLICK_PARAMS, MARKER_LINGER, type FlickParams } from './flick.js';
 import { Rules, START_S } from './rules.js';
 import { createHud } from './hud.js';
 
@@ -72,6 +73,9 @@ export async function createProtoScene(game: Game): Promise<void> {
   // --- Several Cars, each with its own params (ticket 12) ---
   const pushParams: PushParams = { impulseScale: 8.0, maxDrag: 2.5 };
   const camParams = { height: 5.2, back: 1.8, follow: 5 };
+  // Which control scheme is live. Both input layers listen to the same canvas,
+  // so exactly one must be deaf at a time — see `schemeActive()` below.
+  const flickParams: FlickParams = { ...DEFAULT_FLICK_PARAMS };
 
   // Persist tuning across reloads (per browser). testField is NOT persisted.
   // v1 stored ONE global CarParams; v2 stores one set per Car, so v1 saves are
@@ -79,7 +83,7 @@ export async function createProtoScene(game: Game): Promise<void> {
   const STORE_KEY = 'jdt-v0-tuning';
   // v3: grip moved off the Car onto the contact (Surface × tire, ticket 16),
   // so saved per-Car roll/side numbers are meaningless — v2 saves are dropped.
-  const STORE_VERSION = 4; // 4: Surface.rough (mm relief) is gone; it is gravel now
+  const STORE_VERSION = 5; // 5: adds the flick scheme (option C, ticket 18)
   const carList: CarParams[] = STARTING_GRID.map((p) => ({ ...p }));
   try {
     const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as {
@@ -88,6 +92,7 @@ export async function createProtoScene(game: Game): Promise<void> {
       surfaces?: Partial<Record<SurfaceKey, { grip?: number; roll?: number; gravel?: number }>>;
       squares?: Partial<Record<string, SurfaceKey>>;
       pushParams?: Partial<PushParams>;
+      flickParams?: Partial<FlickParams>;
       camParams?: { height?: number; back?: number };
     } | null;
     if (saved) {
@@ -112,6 +117,7 @@ export async function createProtoScene(game: Game): Promise<void> {
         refreshTerrainView();
       }
       Object.assign(pushParams, saved.pushParams ?? {});
+      Object.assign(flickParams, saved.flickParams ?? {});
       Object.assign(camParams, saved.camParams ?? {});
     }
   } catch {
@@ -131,6 +137,7 @@ export async function createProtoScene(game: Game): Promise<void> {
         ),
         squares: field.squares,
         pushParams,
+        flickParams,
         camParams,
       }),
     );
@@ -201,6 +208,40 @@ export async function createProtoScene(game: Game): Promise<void> {
   );
   rulesRef.rules = rules;
 
+  /**
+   * Things that have to run BETWEEN physics steps rather than once per frame.
+   * The world runs 4 steps per frame, and anything driving a body has to keep
+   * pace with the steps — the finger most of all, since it asks for contact to
+   * be resolved between its own moves.
+   */
+  const stepHooks = new Set<() => void>();
+
+  /**
+   * ONE owner per gesture. Both control schemes listen to the same canvas, and
+   * they disagree about what a touch means: a touch ON the Car starts the
+   * slingshot's aim, while for the flick that same touch must stay silent. If
+   * each layer decides for itself, the loser still hears the pointer and can
+   * act later — so the owner is claimed once, by whoever is enabled, and the
+   * other layer sees nothing at all.
+   */
+  const gestureOwner = { id: -1 };
+  const claimGesture = (id: number): boolean => {
+    if (gestureOwner.id !== -1) return false;
+    gestureOwner.id = id;
+    return true;
+  };
+  const releaseGesture = (): void => {
+    gestureOwner.id = -1;
+  };
+
+  /**
+   * Which scheme is listening. A and C are the same gesture with opposite
+   * meanings (a touch ON the Car starts the slingshot's aim and must stay deaf
+   * for C), so exactly one may hear a given pointer — the GUI decides which.
+   */
+  const scheme = { active: flickParams.on ? 'flick' : 'slingshot' };
+  const flickActive = (): boolean => scheme.active === 'flick';
+
   setupSlingshot(
     game,
     getCar,
@@ -209,7 +250,70 @@ export async function createProtoScene(game: Game): Promise<void> {
     pushParams,
     () => rules.pushUsed(),
     (reason) => hud.flash(reason),
-    () => rules.canPush(),
+    () => rules.canPush() && !flickActive(),
+    claimGesture,
+    releaseGesture,
+  );
+
+  /**
+   * Where the last strike landed, kept readable for a couple of seconds. The
+   * flick has no aiming pause, so this IS how the player learns where they hit
+   * — with nothing on screen there is nothing to compare against the hand that
+   * did it. The user asked for exactly this read.
+   */
+  const strikeMark = new THREE.Sprite(
+    new THREE.SpriteMaterial({
+      transparent: true,
+      depthTest: false,
+      depthWrite: false,
+      toneMapped: false,
+      map: (() => {
+        const size = 128;
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d')!;
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(12,12,12,0.92)';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size / 2 - 12, 0, Math.PI * 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size * 0.13, 0, Math.PI * 2);
+        ctx.fillStyle = '#141414';
+        ctx.fill();
+        const tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        return tex;
+      })(),
+    }),
+  );
+  strikeMark.scale.setScalar(0.13);
+  strikeMark.renderOrder = 20;
+  strikeMark.visible = false;
+  scene.add(strikeMark);
+  let strikeAge = 0;
+
+  setupFlick(
+    game,
+    world,
+    getCar,
+    flickParams,
+    () => rules.pushUsed(),
+    (reason) => hud.flash(reason),
+    () => rules.canPush() && flickActive(),
+    (point) => {
+      strikeMark.position.copy(point);
+      strikeMark.visible = true;
+      strikeAge = 0;
+    },
+    stepHooks.add.bind(stepHooks),
+    flickActive,
+    claimGesture,
+    releaseGesture,
   );
 
   // --- Camera: follows the Car, fixed heading, near top-down ---
@@ -315,6 +419,25 @@ export async function createProtoScene(game: Game): Promise<void> {
   pushFolder.add(pushParams, 'impulseScale', 0.5, 12, 0.1).onFinishChange(persist);
   pushFolder.add(pushParams, 'maxDrag', 0.5, 5, 0.1).onFinishChange(persist);
 
+  // The scheme switch sits above the two folders it gates: which Push numbers
+  // mean anything depends on which scheme is hearing the screen.
+  gui
+    .add(scheme, 'active', { Slingshot: 'slingshot', Flick: 'flick' })
+    .name('Control scheme (A / C)')
+    .onChange((v: string) => {
+      flickParams.on = v === 'flick';
+      hud.flash(v === 'flick' ? 'Flick — swipe through the Car' : 'Slingshot — touch the Car, drag, release');
+      persist();
+    });
+
+  const flickFolder = gui.addFolder('Flick (option C)');
+  flickFolder.add(flickParams, 'maxAccel', 20, 2000, 10).name('hand strength (max accel)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'massFactor', 0.5, 30, 0.5).name('finger mass (× Car)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'maxPenetration', 0.002, 0.03, 0.001).name('max penetration (m)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'across', 0.01, 0.15, 0.005).name('knuckle across (m)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'deep', 0.01, 0.15, 0.005).name('knuckle along (m)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'tall', 0.01, 0.15, 0.005).name('knuckle tall (m)').onFinishChange(persist);
+
   // --- Test field: bare speckled concrete, no chalk, no rules ---
   const fieldState = { testField: false };
   function setTestField(on: boolean): void {
@@ -411,8 +534,19 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Main loop: physics, sync, rules, camera ---
   game.onUpdate((dt) => {
-    for (let i = 0; i < 4; i++) world.step(); // 4 × 1/240 = one 60 fps frame
+    for (let i = 0; i < 4; i++) {
+      // Input that drives a body acts per step, before that step is taken.
+      for (const hook of stepHooks) hook();
+      world.step(); // 4 × 1/240 = one 60 fps frame
+    }
     for (const c of cars) c.sync(dt);
+    // The strike marker outlives the gesture, then goes: nothing here is a
+    // permanent mark on the world.
+    if (strikeMark.visible) {
+      strikeAge += dt;
+      strikeMark.material.opacity = Math.max(0, 1 - strikeAge / MARKER_LINGER);
+      if (strikeAge >= MARKER_LINGER) strikeMark.visible = false;
+    }
     rules.update(dt);
 
     const car = getCar();
