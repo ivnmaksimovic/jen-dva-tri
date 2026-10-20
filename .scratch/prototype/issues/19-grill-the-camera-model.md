@@ -1,7 +1,7 @@
 # 19: Grill the camera model (small)
 
 Type: grilling
-Status: open
+Status: resolved
 Blocked by: (none)
 
 The camera needs its own home, but it does **not** need a big grilling
@@ -33,7 +33,24 @@ Already settled elsewhere (do not re-ask):
   = zoom, twist = rotate, two-finger drag = pan. That rule lives in ticket 18
   because it defines the flick gesture, not here.
 
-## Open questions (small set, for after some testing)
+## Answer (what shipped)
+
+- **Two fingers belong to the camera, one finger to the game.** Pinch = zoom,
+  twist = rotate, two-finger drag = pan. Enforced in `camera.ts`, and guarded
+  headlessly in `check:flick`: when the camera claims a second finger, whatever
+  Push gesture thought it owned the canvas is cancelled, and afterwards one
+  finger still Pushes.
+- **Following is a MODE, not a property**: the camera follows the aimed Car
+  until the first two-finger touch, then stays put. Recentre (GUI button)
+  restores it and resets zoom/rotation.
+- **Recentre targets the SELECTED Car**, which is also the last Car pushed,
+  since selection follows whatever you push. That answered the old question
+  "recentre where?" — it needed no new concept.
+- Zoom limits are deliberately wide (0.4x–2.5x): at the far end the whole Track
+  loop is visible. Whether being able to see everything changes how the game
+  reads is one of the questions left for playing.
+
+## Open questions (still small, still for after testing)
 
 - Recentre at all, or is it noise once panning works? (currently "yes, but not
   sure")
@@ -46,4 +63,8 @@ Already settled elsewhere (do not re-ask):
 ## Done when
 
 The user has played with free controls on the phone and answers the questions
-above; the answers land here under `## Answer`.
+above; the answers land here under `## Answer
+
+Resolved by building it (2026-10-20) rather than grilling further — the user's
+line was that more camera decisions could wait until free controls had been
+played with, so the conclusions below are what shipped and are open to revision.`.

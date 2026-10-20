@@ -170,6 +170,30 @@ comes out of the model rather than being enforced.
   a reference table; nothing here depends on it, but high-energy strikes are not
   safe territory in the existing Car either.
 
+**What the first phone session changed (2026-10-20).** Default mass 5 and
+strength 300 were absurd — over 3 m of roll from one flick. The user dialled
+them to **0.5 × the Car and 100**, and those are now the seeds. Three
+consequences, all measured:
+
+- **The heading scatter was a symptom, not the model.** At those settings a
+  dead-centre flick leaves 0.8° (it was 2°…18° at the violent settings) with the
+  corner flick turning ~3× more. The knife-edge was the over-strong transfer.
+- **Strength is NOT monotonic once the finger is lighter than the Car**: a
+  gentle finger presses longer rather than harder, so roll tracks contact
+  DURATION as much as how fast you swipe (measured 19 / 20 / 48 cm for 0.3 / 0.6
+  / 1.0 m/s). `check:finger` reports this instead of asserting it — whether it
+  reads as control is a question for hands, not for a headless check.
+- **A hard swipe may deliver NOTHING**: at maxAccel 100 the finger cannot reach
+  2 m/s inside a normal stroke (that needs 0.2 s and 20 cm), so it never arrives.
+  Honest, and it is why `maxAccel` is called the strength knob.
+
+**OPEN (parked) — the predictive clamp.** A version using `castAhead` to limit
+the servo's AIM was built, measured and backed out: it respected the penetration
+budget, but cut every transfer to a fifth–a half and brought the heading scatter
+back — and it was not what the user had tested, so shipping it would have
+invalidated their tuning. At the current tuned settings the budget holds anyway
+(1.01 mm against 1 mm). Try it again if raising strength brings the leak back.
+
 **OPEN — the heading is a knife-edge.** A dead-centre flick leaves anywhere from
 +2° to -18° depending on the run-up, deterministically (the same inputs give the
 same answer every time) and independent of how wide the knuckle is (0.4–2.4 cm

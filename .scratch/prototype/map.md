@@ -312,8 +312,25 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
     frame, and a once-per-frame finger teleports 8 mm through its own contacts.
     `proto.ts` now has `stepHooks` for exactly this.
 
-- Ticket 19 — **the camera is now controllable** (deliberately small grilling
-  ticket). The early "fixed near-top view" decision is **VOID — the user does
+- Ticket 19 — **DONE: the camera is the player's.** `src/game/proto/camera.ts`:
+  pinch = zoom, twist = rotate, two fingers = pan; following is a MODE that ends
+  the moment the player touches it, and Recentre gives it back (default birdseye
+  over the selected Car). **One finger = the game, two = the camera**, and when
+  the camera claims it, the Push scheme is told to drop the gesture — guarded
+  from both sides in `check:flick` (now 9 checks). The old "fixed near-top view"
+  decision is void.
+
+- **What the first real phone session did to the numbers (2026-10-20):** seeds
+  are now the user's (finger mass 0.5 x Car, hand strength 100 — mine were over
+  3 m of roll per flick), and with them the heading scatter COLLAPSED to 0.8°:
+  the knife-edge was a symptom of the violent transfer, not of the model. But
+  with a finger lighter than the Car, **strength is not monotonic** (19/20/48 cm
+  for 0.3/0.6/1.0 m/s — a gentle press transfers by duration, not force), and a
+  hard swipe can deliver NOTHING because the hand cannot accelerate the finger
+  to that speed within a stroke. All three are reported by `check:finger` rather
+  than asserted; whether they read as control is the user's call.
+
+- Ticket 19 — **design notes below** (it was also the grilling ticket). The early "fixed near-top view" decision is **VOID — the user does
   not care about it**: early testing showed everyone expects zoom/rotate/pan,
   including the user. Default stays the birdseye that follows the aimed Car;
   **the first manual gesture turns follow off, Recentre restores it**;
