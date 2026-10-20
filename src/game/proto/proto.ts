@@ -250,9 +250,10 @@ export async function createProtoScene(game: Game): Promise<void> {
     pushParams,
     () => rules.pushUsed(),
     (reason) => hud.flash(reason),
-    () => rules.canPush() && !flickActive(),
+    () => rules.canPush(), // the Turn budget: its own question, not the switch
     claimGesture,
     releaseGesture,
+    () => !flickActive(), // slingshot mode only: otherwise hear nothing at all
   );
 
   /**
@@ -301,6 +302,8 @@ export async function createProtoScene(game: Game): Promise<void> {
     game,
     world,
     getCar,
+    () => cars,
+    (picked) => setActive(cars.indexOf(picked)),
     flickParams,
     () => rules.pushUsed(),
     (reason) => hud.flash(reason),

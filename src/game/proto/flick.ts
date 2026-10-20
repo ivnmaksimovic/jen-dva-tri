@@ -44,6 +44,9 @@ export function setupFlick(
   world: RAPIER.World,
   /** The aimed Car — set by TAPS and by the GUI, never by a flick. */
   getCar: () => Car,
+  /** Every Car, because a TAP selects whichever Car it lands on. */
+  getCars: () => Car[],
+  onPick: (car: Car) => void,
   params: FlickParams,
   onPush: () => void,
   onRefused: (reason: string) => void,
@@ -73,6 +76,11 @@ export function setupFlick(
   /** Set the moment contact lands, so one swipe cannot claim two Pushes. */
   let struck = false;
   let strikePoint = new THREE.Vector3();
+  /** Set when the touch landed on a Car: a tap selects it, a swipe does not. */
+  let tappedCar: Car | null = null;
+  let travelled = 0;
+  /** Past this, the gesture stopped being a tap (world units, 1 unit = 10 cm). */
+  const TAP_TRAVEL = 0.1;
 
   function toNDC(e: PointerEvent): void {
     const r = el.getBoundingClientRect();
@@ -93,11 +101,23 @@ export function setupFlick(
     return raycaster.ray.intersectPlane(plane, out) ? out : null;
   }
 
-  /** Is this touch down ON the aimed Car? Then it is not the start of a flick. */
-  function touchesCar(e: PointerEvent): boolean {
+  /**
+   * Which Car (if any) is under this touch. A touch ON a Car is never the start
+   * of a flick — but it may still be a TAP, and selecting is what taps do.
+   */
+  function carUnder(e: PointerEvent): Car | null {
     toNDC(e);
     raycaster.setFromCamera(ndc, game.camera);
-    return raycaster.intersectObjects(getCar().group.children, true).length > 0;
+    let best: Car | null = null;
+    let bestDist = Infinity;
+    for (const car of getCars()) {
+      const hits = raycaster.intersectObjects(car.group.children, true);
+      if (hits.length > 0 && hits[0].distance < bestDist) {
+        bestDist = hits[0].distance;
+        best = car;
+      }
+    }
+    return best;
   }
 
   el.addEventListener('pointerdown', (e) => {
@@ -109,7 +129,9 @@ export function setupFlick(
      * It is not a selection change either — that is the slingshot's job, and it
      * only gets the gesture if we hand the claim back.
      */
-    if (touchesCar(e)) {
+    const onCar = carUnder(e);
+    if (onCar) {
+      tappedCar = onCar; // a tap will select it; a swipe past it does nothing
       releaseGesture?.();
       return;
     }
@@ -130,6 +152,8 @@ export function setupFlick(
       return;
     }
     struck = false;
+    travelled = 0;
+    tappedCar = null;
     pointerId = e.pointerId;
     // Aims at the aimed Car ONLY: every other Car, the Terrain and the Surface
     // pads are ghosts to it, so a swipe across the Track disturbs nothing else.
@@ -144,7 +168,10 @@ export function setupFlick(
   el.addEventListener('pointermove', (e) => {
     if (!finger || e.pointerId !== pointerId) return;
     const at = fingerPoint(e);
-    if (at) nextTarget = at;
+    if (at) {
+      travelled += at.distanceTo(nextTarget.lengthSq() > 0 ? nextTarget : at.clone());
+      nextTarget = at;
+    }
   });
 
   el.addEventListener('pointerup', endGesture);
@@ -154,6 +181,12 @@ export function setupFlick(
   let nextTarget = new THREE.Vector3();
 
   function endGesture(): void {
+    // Never touched a Car but barely moved: that is a tap, and taps select.
+    if (!finger && tappedCar) {
+      if (travelled < TAP_TRAVEL) onPick(tappedCar);
+      tappedCar = null;
+      travelled = 0;
+    }
     if (!finger) return;
     finger.end();
     finger = null;

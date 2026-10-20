@@ -181,33 +181,39 @@ async function makeRig(): Promise<Rig> {
     host,
     () => cars[rig.active],
     () => cars,
-    (picked) => {
+    (picked: Car) => {
       rig.active = cars.indexOf(picked);
       rig.picked.push(picked);
     },
     { impulseScale: 8.0, maxDrag: 2.5 },
     () => {
-      rig.pushed += 1;
+      rig.pushed += 1; // onPush
     },
-    (reason) => rig.refused.push(reason),
-    () => !rig.flickOn, // the slingshot is deaf while the flick is live
-    (id) => claim(id, rig.owner),
+    (reason: string) => rig.refused.push(reason), // onRefused
+    () => true, // canPush — the Turn budget is not what these checks are about
+    (id: number) => claim(id, rig.owner),
     () => release(rig.owner),
+    () => !rig.flickOn, // enabled: hear NOTHING while the flick is live
   );
   setupFlick(
     host,
     world,
     () => cars[rig.active],
+    () => cars,
+    (picked) => {
+      rig.active = cars.indexOf(picked);
+      rig.picked.push(picked);
+    },
     { ...DEFAULT_FLICK_PARAMS },
     () => {
       rig.pushed += 1;
     },
-    (reason) => rig.refused.push(reason),
+    (reason: string) => rig.refused.push(reason),
     () => true,
     () => {},
-    (fn) => rig.stepHooks.push(fn),
+    (fn: () => void) => rig.stepHooks.push(fn),
     () => rig.flickOn,
-    (id) => claim(id, rig.owner),
+    (id: number) => claim(id, rig.owner),
     () => release(rig.owner),
   );
 
@@ -324,6 +330,53 @@ async function check5_theOtherSchemeStaysDeaf(): Promise<void> {
   );
 }
 
+/**
+ * 6. In flick mode nothing must leak OUT of the other scheme: no Push, no aim,
+ *    and above all no refusal messages about the other scheme's rules. A lies
+ *    ("out of Pushes" when the Pushes are fine) and it reads as a broken game.
+ */
+async function check6_noLiesFromTheIdleScheme(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  // Start ON the Car and drag away: in slingshot mode this would be a legal
+  // aim. In flick mode it must be silent — not refused by rules that aren't on.
+  syncView(rig);
+  const on = screenOf(rig, rig.cars[0].position.clone());
+  const away = screenOf(rig, rig.cars[0].position.clone().add(new THREE.Vector3(1.0, 0, 0)));
+  rig.el.fire('pointerdown', on.x, on.y);
+  for (let i = 1; i <= 12; i++) {
+    rig.el.fire('pointermove', on.x + ((away.x - on.x) * i) / 12, on.y + ((away.y - on.y) * i) / 12);
+    frame(rig, 1);
+  }
+  rig.el.fire('pointerup', away.x, away.y);
+  frame(rig, 180);
+  record(
+    'the idle scheme stays silent — no Push, and no refusal about rules it isn’t running',
+    rig.pushed === 0 && rig.refused.length === 0,
+    `Pushes ${rig.pushed}, refusals [${rig.refused.join('; ')}]`,
+  );
+}
+
+/** 7. Selection is TAP-ONLY, in flick mode too: a tap must still select. */
+async function check7_tapStillSelectsInFlickMode(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  rig.active = 0;
+  const before = rig.cars.map((c) => c.position.clone());
+  syncView(rig);
+  const spot = screenOf(rig, rig.cars[1].position.clone());
+  rig.el.fire('pointerdown', spot.x, spot.y);
+  frame(rig, 2);
+  rig.el.fire('pointerup', spot.x, spot.y);
+  frame(rig, 120);
+  const moved = rig.cars.map((c, i) => c.position.distanceTo(before[i]) * 10);
+  record(
+    'a tap still selects in flick mode (and Pushes nothing)',
+    rig.active === 1 && rig.pushed === 0 && Math.max(...moved) < 0.1,
+    `selected Car 2: ${rig.active === 1}, Pushes ${rig.pushed}, moved ${moved.map((m) => `${m.toFixed(2)} cm`).join(' / ')}`,
+  );
+}
+
 export async function run(): Promise<boolean> {
   console.log('the flick — its rules, driven through real events (ticket 18)\n');
   await check1_swipeStillPushes();
@@ -331,6 +384,8 @@ export async function run(): Promise<boolean> {
   await check3_touchingDownOnTheCarDoesNothing();
   await check4_oneGestureIsOnePush();
   await check5_theOtherSchemeStaysDeaf();
+  await check6_noLiesFromTheIdleScheme();
+  await check7_tapStillSelectsInFlickMode();
   const failed = results.filter((r) => !r.ok).length;
   console.log(
     `\n${results.length - failed}/${results.length} checks passed` +

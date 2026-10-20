@@ -90,6 +90,13 @@ export function setupSlingshot(
    */
   claimGesture?: (pointerId: number) => boolean,
   releaseGesture?: () => void,
+  /**
+   * Is this scheme even listening? The two schemes never both act, but a deaf
+   * layer that still handles pointers is not deaf — it registers aims and
+   * flashes refusals for the scheme that IS live. Checked FIRST here, before
+   * touching anything: not listening means not hearing at all.
+   */
+  enabled?: () => boolean,
 ): void {
   const raycaster = new THREE.Raycaster();
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // ground plane y=0
@@ -256,6 +263,7 @@ export function setupSlingshot(
   }
 
   el.addEventListener('pointerdown', (e) => {
+    if (enabled && !enabled()) return; // the other scheme is live: hear nothing
     if (claimGesture && !claimGesture(e.pointerId)) return; // another layer owns it
     // Claim, then decide: if this touch is not an aim the claim has to go back,
     // or the other scheme stays deaf for the rest of the gesture.
