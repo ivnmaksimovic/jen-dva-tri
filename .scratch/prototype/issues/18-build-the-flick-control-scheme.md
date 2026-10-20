@@ -192,6 +192,20 @@ GUI panel. Exposed live for tuning, persisted with everything else: `maxAccel`
 penetration budget, and the knuckle's three dimensions. The strike keeps a mark
 for 2 s afterwards, which is how you learn where you actually hit.
 
+**The two schemes never overlap.** They never both Pushed, but they were not
+separate either: the slingshot heard every pointer while the flick was live and
+only bailed out deep inside, by which point it had registered an aim and could
+flash "out of Pushes" for rules that were not even running. Fixed on two levels
+— `claimGesture`/`releaseGesture` arbitration (one owner per gesture) AND an
+`enabled` guard checked before either layer touches anything: not listening now
+means hearing nothing. Tap-to-select lives in `flick.ts`, so each scheme owns
+its own selection rather than borrowing the other's handlers by accident.
+
+Lesson worth carrying: these input layers take ten positional arguments with an
+optional tail, and omitting one silently shifts every later argument onto the
+wrong parameter — invisible at runtime, caught only by the type checker. When
+adding another one, consider an options object instead.
+
 **Both schemes share one canvas, so there is ONE owner per gesture.** Added
 `claimGesture`/`releaseGesture` arbitration: the layer that touches down first
 owns it, and hands the claim back if it decides the touch is not its business.
