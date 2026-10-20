@@ -313,6 +313,7 @@ export async function createProtoScene(game: Game): Promise<void> {
       strikeMark.visible = true;
       strikeAge = 0;
     },
+    (text, illegal) => hud.setStrike(text, illegal),
     stepHooks.add.bind(stepHooks),
     flickActive,
     claimGesture,
@@ -434,12 +435,20 @@ export async function createProtoScene(game: Game): Promise<void> {
     });
 
   const flickFolder = gui.addFolder('Flick (option C)');
-  flickFolder.add(flickParams, 'maxAccel', 20, 2000, 10).name('hand strength (max accel)').onFinishChange(persist);
-  flickFolder.add(flickParams, 'massFactor', 0.5, 30, 0.5).name('finger mass (× Car)').onFinishChange(persist);
+  // Ranges, not recommendations: the first seed defaults (mass 5, strength 300)
+  // were far too strong — over 3 m of roll from one flick — and the user dialled
+  // them DOWN to 0.5 and 100. So both go an order of magnitude below that and
+  // the mass slider reaches well under the Car's own mass, which is where the
+  // interesting combinations with a stronger hand live.
+  flickFolder.add(flickParams, 'maxAccel', 5, 2000, 5).name('hand strength (max accel)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'massFactor', 0.02, 20, 0.01).name('finger mass (× Car)').onFinishChange(persist);
   flickFolder.add(flickParams, 'maxPenetration', 0.002, 0.03, 0.001).name('max penetration (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'across', 0.01, 0.15, 0.005).name('knuckle across (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'deep', 0.01, 0.15, 0.005).name('knuckle along (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'tall', 0.01, 0.15, 0.005).name('knuckle tall (m)').onFinishChange(persist);
+  flickFolder.add(flickParams, 'window', 0.1, 1, 0.05).name('legal strike window (s)').onFinishChange(persist);
+  flickFolder
+    .add({ recentre: () => setActive(active) }, 'recentre')
 
   // --- Test field: bare speckled concrete, no chalk, no rules ---
   const fieldState = { testField: false };

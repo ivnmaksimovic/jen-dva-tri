@@ -27,6 +27,12 @@ export interface Hud {
   setCarLabel(name: string, color: number): void;
   /** What each wheel is standing on, per wheel, in order (ticket 16 readout). */
   setWheelSurfaces(reads: { label: string; color: number }[]): void;
+  /**
+   * The last strike's contact readout (ticket 18): how long the finger stayed
+   * on the Car and whether that overran the legal window. Display only —
+   * riding is illegal, not prevented.
+   */
+  setStrike(text: string | null, illegal: boolean): void;
 }
 
 const RESET_BACK = 0.3; // place the Car this far behind a checkpoint line

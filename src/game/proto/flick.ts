@@ -31,11 +31,20 @@ const MARKER_LINGER = 2;
 export interface FlickParams extends FingerParams {
   /** Which control scheme is live: C off means this input layer is deaf. */
   on: boolean;
+  /**
+   * How long contact may last before it stops being a strike and becomes
+   * riding — the ~300 ms shared with push-the-phone (one number, one meaning:
+   * a legal Push is a bounded strike). It is NOT enforced. Exceeding it is
+   * reported and left alone: in the real game other players shout at you, the
+   * universe does not stop you. What riding costs is a v1 rules question.
+   */
+  window: number;
 }
 
 export const DEFAULT_FLICK_PARAMS: FlickParams = {
   ...DEFAULT_FINGER_PARAMS,
   on: true,
+  window: 0.3,
 };
 
 export function setupFlick(
@@ -53,6 +62,8 @@ export function setupFlick(
   canPush: () => boolean,
   /** Called with the strike's contact point so it can be shown afterwards. */
   onStrike: (point: THREE.Vector3) => void,
+  /** The contact readout: how long the finger stayed on, and if that was riding. */
+  onContactRead: (text: string, illegal: boolean) => void,
   /** Run between physics steps (called by the host's step loop). */
   perStep: (fn: () => void) => void,
   /** Whether this scheme is listening at all (toggled live from the GUI). */
@@ -79,6 +90,10 @@ export function setupFlick(
   /** Set when the touch landed on a Car: a tap selects it, a swipe does not. */
   let tappedCar: Car | null = null;
   let travelled = 0;
+  /** Time this gesture has spent touching the Car (seconds). */
+  let contactTime = 0;
+  /** Whether contact has been reported yet for this gesture. */
+  let reported = false;
   /** Past this, the gesture stopped being a tap (world units, 1 unit = 10 cm). */
   const TAP_TRAVEL = 0.1;
 
@@ -153,6 +168,8 @@ export function setupFlick(
     }
     struck = false;
     travelled = 0;
+    contactTime = 0;
+    reported = false;
     tappedCar = null;
     pointerId = e.pointerId;
     // Aims at the aimed Car ONLY: every other Car, the Terrain and the Surface
@@ -181,6 +198,7 @@ export function setupFlick(
   let nextTarget = new THREE.Vector3();
 
   function endGesture(): void {
+    reportContact();
     // Never touched a Car but barely moved: that is a tap, and taps select.
     if (!finger && tappedCar) {
       if (travelled < TAP_TRAVEL) onPick(tappedCar);
@@ -195,8 +213,22 @@ export function setupFlick(
     releaseGesture?.();
   }
 
+  /** Contact maths is bound to the gesture too: it dies when the finger does. */
+  function countContact(dt: number): void {
+    if (!finger) return;
+    if (finger.contactReport().some((c) => c.impulse > 0)) contactTime += dt;
+  }
+
+  function reportContact(): void {
+    if (reported || contactTime <= 0) return;
+    reported = true;
+    const illegal = contactTime > params.window;
+    onContactRead(`${(contactTime * 1000).toFixed(0)} ms on the Car${illegal ? ' — riding (illegal)' : ''}`, illegal);
+  }
+
   perStep(() => {
     if (!finger) return;
+    countContact(1 / 240);
     // Driven every STEP, not every frame: the physics runs 4 steps per frame,
     // and a finger that only moved once per frame would teleport 8 mm at a
     // swipe while asking contact to be resolved in between.

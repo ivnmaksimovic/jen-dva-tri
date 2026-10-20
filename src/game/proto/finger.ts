@@ -92,8 +92,11 @@ export const DEFAULT_FINGER_PARAMS: FingerParams = {
   deep: 0.06,
   tall: 0.05,
   maxPenetration: 0.01, // 1 mm
-  massFactor: 5, // five times the Car it is aiming at
-  maxAccel: 300, // 30 m/s² — a snap, not a shove
+  // The user's first working numbers after feeling it on a real phone
+  // (2026-10-20): my seeds (mass 5, strength 300) were wildly too strong — a
+  // single flick rolled the Car over 3 m. These are theirs, not mine.
+  massFactor: 0.5,
+  maxAccel: 100,
 };
 
 /** The finger's box: local +X along the strike, +Y up, +Z across the knuckle. */

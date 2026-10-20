@@ -78,6 +78,15 @@ export function createHud(
     return cell;
   });
 
+  // Ticket 18: how long the finger stayed on the Car. Riding is ILLEGAL, not
+  // prevented, so it has to be readable rather than fixed — and it must stay
+  // readable while the player experiments, not flash and vanish.
+  const strike = document.createElement('div');
+  strike.style.cssText =
+    'font-size: 11px; font-variant-numeric: tabular-nums; min-height: 14px;'
+    + ' opacity: 0; transition: opacity .2s;';
+  root.appendChild(strike);
+
   const actions = document.createElement('div');
   actions.style.cssText = 'display: flex; gap: 6px;';
   const nextTurnBtn = document.createElement('button');
@@ -125,6 +134,17 @@ export function createHud(
       whoText.textContent = name;
       swatch.style.background = `#${color.toString(16).padStart(6, '0')}`;
     },
+    /**
+     * The last strike: how long the finger was in contact, and whether that
+     * overran the legal window. Shown, never acted on — what riding COSTS is a
+     * v1 rules question, and inventing a penalty here would be inventing a rule.
+     */
+    setStrike(text: string | null, illegal: boolean): void {
+      strike.textContent = text ?? '';
+      strike.style.color = illegal ? '#ff8080' : '#fff';
+      strike.style.opacity = text ? '1' : '0';
+    },
+
     setWheelSurfaces(reads: { label: string; color: number }[]): void {
       wheelCells.forEach((cell, i) => {
         const read = reads[i];
