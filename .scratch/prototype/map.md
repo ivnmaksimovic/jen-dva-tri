@@ -300,6 +300,18 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
     contact point, its normal and its impulse — how you AUDIT where a strike
     landed instead of believing where you aimed.
 
+- Ticket 18 is **PLAYABLE**: `pnpm dev` → GUI → Control scheme (A / C) → Flick.
+  Tunables exposed live (maxAccel = strength, finger mass, penetration budget,
+  knuckle dimensions), strike marked for 2 s, and `pnpm check:flick` guards the
+  scheme's promises headlessly. Two things learned wiring it up:
+  - **Both schemes listen to one canvas → ONE owner per gesture.** Added claim/
+    release arbitration; without it whichever layer declined a touch still heard
+    everything after it (caught by `check:flick` check 3). Same shape as the old
+    tap-to-select bug: two listeners, one canvas, no arbiter.
+  - **The finger must be driven per physics STEP, not per frame** — 4 steps per
+    frame, and a once-per-frame finger teleports 8 mm through its own contacts.
+    `proto.ts` now has `stepHooks` for exactly this.
+
 - Ticket 19 — **the camera is now controllable** (deliberately small grilling
   ticket). The early "fixed near-top view" decision is **VOID — the user does
   not care about it**: early testing showed everyone expects zoom/rotate/pan,

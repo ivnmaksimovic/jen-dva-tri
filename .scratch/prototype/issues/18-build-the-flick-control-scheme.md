@@ -184,6 +184,33 @@ stiffening the servo sideways, or deciding the scatter is part of the game.
 Predicting the step (as the kinematic path already does with `castAhead`) should
 close it, and is the obvious next build step.
 
+## Playable on the phone (steps 2–5, committed 2026-10-19)
+
+`pnpm dev`, open it on the phone, pick **Control scheme (A / C)** = Flick in the
+GUI panel. Exposed live for tuning, persisted with everything else: `maxAccel`
+(the strength — see below), finger mass as a multiple of the Car, the
+penetration budget, and the knuckle's three dimensions. The strike keeps a mark
+for 2 s afterwards, which is how you learn where you actually hit.
+
+**Both schemes share one canvas, so there is ONE owner per gesture.** Added
+`claimGesture`/`releaseGesture` arbitration: the layer that touches down first
+owns it, and hands the claim back if it decides the touch is not its business.
+Without it the loser still heard every pointer — found by `check:flick` (check 3)
+during the build, with the symptom of a Car nobody aimed at moving. Same shape
+as the old tap-to-select bug: two listeners, one canvas, no arbiter.
+
+**The finger is driven per physics STEP, not per frame.** The world runs 4 steps
+per frame; driving once per frame made the finger teleport 8 mm through its own
+contacts. `proto.ts` now has a `stepHooks` set the input layer feeds.
+
+`pnpm check:flick` guards the promises headlessly through real pointer events:
+selection stays tap-only, touchdown-on-the-Car does nothing, one gesture is one
+Push even on a long slow sweep, and whichever scheme is off is deaf.
+
+First real numbers from the wired-up layer (synthetic swipe, default settings):
+65 cm of roll from one swipe. Nothing more is claimed about that until someone
+has pushed a Car with a thumb.
+
 Note this ticket carries **no go/no-go verdict** (unlike ticket 13's role): the
 user has already decided C stays, so what remains is tuning and experimenting,
 not judging.
