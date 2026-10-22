@@ -1,7 +1,7 @@
 # 20: Make it look like the thing it is — chalk on real ground, in daylight
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: (none) — chosen by the agent while the user slept (2026-10-22).
 
 The user's brief: "we are working on making this game great… it does not look
@@ -39,10 +39,19 @@ throwaway.
   material; fog must be relative to the camera when the camera is free.
 - Throwaway: this file's wiring, the GUI folder, the module layout.
 
+## Measured (`pnpm check:look`, new)
+
+36 drawable objects, 18 distinct materials, all 13 chalk pieces sharing one
+material — a phone-sized budget, and now guarded so it cannot creep silently.
+
 ## Known risks, stated rather than hidden
 
 - I cannot see the screen. Chalk width and exposure are guesses sized from the
   world scale (1 unit = 10 cm); expect to retune them by eye.
+- The environment map is built by PMREM at startup, which needs a real WebGL
+  renderer — so unlike everything else here it is NOT covered by a headless
+  check. If it misbehaves on the device, `environment` to 0 in the Look folder
+  turns it off.
 - Environment map costs one-time PMREM work and a little memory; it is one draw
   call's worth of nothing thereafter, but it is a real cost on old phones, hence
   the toggle.
