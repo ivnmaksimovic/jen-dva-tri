@@ -90,6 +90,30 @@ like "why does catching the side turn it easily but a rear-corner flick not much
 can be answered by LOOKING at contact rather than reasoning about it. Drawn from
 the body's own pose, and it dies with the gesture like everything else does.
 
+## Third round (2026-10-22): desktop, limits, and a stray finger
+
+- **Desktop.** Pinch and three-finger gestures need fingers, and developing on a
+  desktop needs the camera too (desktop may become a real way to play later).
+  Settled, with one deliberate break from Maps: **wheel** zooms toward the
+  pointer, **right-drag** pans, **middle-drag** rotates and tilts (alt/shift for
+  trackpads) — but the **left button stays the game's**, because that is how you
+  flick a Car with a mouse. Maps uses left-drag to pan; here that would make the
+  game unplayable, so the camera takes the buttons the game leaves free.
+- **Limits.** Zoom out now reaches x60 (with `Game`'s far plane widened from 100
+  to 4000, which was silently clipping the world at that distance), so a huge
+  Track fits on screen. Cars becoming invisible at that range is accepted.
+  Tilt reaches **0 = straight down**; bird eye was one clamp short of reachable,
+  which reads as broken rather than as a limit.
+- **Three fingers tilt and nothing else** — reaching the limit used to continue
+  into a pan.
+- **A finger arriving after the camera took the canvas is ignored.** This was
+  the reported bug: a tilt gesture kept summoning a knuckle under one finger.
+  The fix is stronger than cancelling — the Push schemes are SUSPENDED until
+  every finger lifts, otherwise each new finger starts a fresh gesture. Guarded
+  headlessly now (`check:flick` 8d) alongside six other camera checks.
+- The height/back/zoom/tilt sliders are GONE: one way to frame the view, with
+  the fingers. Recentre still needs those values, so they live in `camParams`.
+
 ## Open questions (still small, still for after testing)
 
 - Recentre at all, or is it noise once panning works? (currently "yes, but not
