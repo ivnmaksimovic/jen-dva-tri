@@ -474,6 +474,10 @@ export async function createProtoScene(game: Game): Promise<void> {
   flickFolder.add(flickParams, 'tall', 0.01, 0.15, 0.005).name('knuckle tall (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'window', 0.1, 1, 0.05).name('legal strike window (s)').onFinishChange(persist);
   flickFolder
+    .add(flickParams, 'fingerView', { off: 'off', wireframe: 'wire', solid: 'solid' })
+    .name('show the knuckle')
+    .onChange(() => persist());
+  flickFolder
     .add({ recentre: () => setActive(active) }, 'recentre')
 
   // --- Test field: bare speckled concrete, no chalk, no rules ---
@@ -501,6 +505,16 @@ export async function createProtoScene(game: Game): Promise<void> {
   camFolder.add(camParams, 'follow', 0, 12, 0.5).name('follow rate').onFinishChange(persist);
   camFolder.add(camParams, 'zoom', 0.4, 2.5, 0.01).name('zoom').onFinishChange(persist);
   camFolder.add(camParams, 'following').name('follow aimed Car').onFinishChange(persist);
+  const tiltUi = { deg: THREE.MathUtils.radToDeg(camParams.tilt) };
+  camFolder
+    .add(tiltUi, 'deg', 2, 72, 1)
+    .name('tilt off vertical (deg)')
+    .onChange((v: number) => {
+      camParams.tilt = THREE.MathUtils.degToRad(v);
+      persist();
+    });
+  // Wrong-direction guess? This is one click instead of one round trip with me.
+  camFolder.add(camParams, 'invertRotate').name('invert rotation').onChange(persist);
   camFolder
     .add(
       {

@@ -39,12 +39,21 @@ export interface FlickParams extends FingerParams {
    * universe does not stop you. What riding costs is a v1 rules question.
    */
   window: number;
+  /**
+   * Draw the knuckle: 'off', 'wire' (see through it to the Car) or 'solid'.
+   * Asked for as a way to SEE the strike — why catching the Car on its side
+   * turns it easily while the same flick into the rear corner does much less is
+   * a question about contact, and you cannot answer a contact question without
+   * seeing the thing that made contact.
+   */
+  fingerView: 'off' | 'wire' | 'solid';
 }
 
 export const DEFAULT_FLICK_PARAMS: FlickParams = {
   ...DEFAULT_FINGER_PARAMS,
   on: true,
   window: 0.3,
+  fingerView: 'off',
 };
 
 export function setupFlick(
@@ -89,6 +98,8 @@ export function setupFlick(
   let strikePoint = new THREE.Vector3();
   /** Set when the touch landed on a Car: a tap selects it, a swipe does not. */
   let tappedCar: Car | null = null;
+  /** The drawn knuckle, if the setup menu asked for one. Lives with the gesture. */
+  let view: THREE.Mesh | null = null;
   let travelled = 0;
   /** Time this gesture has spent touching the Car (seconds). */
   let contactTime = 0;
@@ -175,6 +186,23 @@ export function setupFlick(
     // Aims at the aimed Car ONLY: every other Car, the Terrain and the Surface
     // pads are ghosts to it, so a swipe across the Track disturbs nothing else.
     finger = Finger.begin(world, at, car, params);
+    if (params.fingerView !== 'off') {
+      view = new THREE.Mesh(
+        new THREE.BoxGeometry(params.deep * 2, params.tall * 2, params.across * 2),
+        new THREE.MeshBasicMaterial({
+          color: 0xffc65c,
+          wireframe: params.fingerView === 'wire',
+          transparent: true,
+          opacity: params.fingerView === 'wire' ? 0.9 : 0.55,
+          // It is an instrument, not an object: never hide the Car behind it and
+          // never let it fight the Car for depth.
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
+      view.renderOrder = 25;
+      game.scene.add(view);
+    }
     try {
       el.setPointerCapture(e.pointerId);
     } catch {
@@ -199,6 +227,12 @@ export function setupFlick(
 
   function endGesture(): void {
     reportContact();
+    if (view) {
+      game.scene.remove(view);
+      (view.geometry as THREE.BoxGeometry).dispose();
+      (view.material as THREE.Material).dispose();
+      view = null;
+    }
     // Never touched a Car but barely moved: that is a tap, and taps select.
     if (!finger && tappedCar) {
       if (travelled < TAP_TRAVEL) onPick(tappedCar);
@@ -233,6 +267,12 @@ export function setupFlick(
     // and a finger that only moved once per frame would teleport 8 mm at a
     // swipe while asking contact to be resolved in between.
     finger.drive(nextTarget, true, 1 / 240);
+    // The drawing only exists while the finger does, and it is drawn from the
+    // body itself — one source, so what you see is where the contact is.
+    if (view) {
+      view.position.copy(finger.position);
+      view.quaternion.copy(finger.quaternion());
+    }
     if (struck) return;
     // First contact on this gesture IS the strike. Where it lands is decided by
     // contact, not by us: the weighted centre of the contact points, on the
@@ -248,6 +288,10 @@ export function setupFlick(
     }
     struck = true;
     strikePoint = sum.divideScalar(total);
+    if (view) {
+      view.position.copy(finger.position);
+      view.quaternion.copy(finger.quaternion());
+    }
     onStrike(strikePoint);
     onPush();
   });

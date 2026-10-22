@@ -405,11 +405,14 @@ export class Finger {
 
   /**
    * The finger's attitude: its face stays perpendicular to wherever it is
-   * going. The user corrected me here — the knuckle SPINS during a strike, so
+   * going. Public because the visual seen during play is drawn from it —
+   * nothing should hold a second opinion about which way the knuckle faces.
+   *
+   * The user corrected me here early on: the knuckle SPINS during a strike, so
    * corner-first hits are real and must stay possible. Only its presentation
    * stays horizontal: the knuckle is not a ball.
    */
-  private quaternion(): THREE.Quaternion {
+  quaternion(): THREE.Quaternion {
     const up = new THREE.Vector3(0, 1, 0);
     const across = new THREE.Vector3().crossVectors(this.heading, up).normalize();
     return new THREE.Quaternion().setFromRotationMatrix(

@@ -458,6 +458,34 @@ async function check9_oneFingerStillPushesAfterwards(): Promise<void> {
   );
 }
 
+/**
+ * 8c. Three fingers change the TILT — how steeply we look down. Guarded because
+ *     the camera as a whole once went dead under green checks; anything here
+ *     that has no test is assumed to rot.
+ */
+async function check8c_threeFingersTiltTheView(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  syncView(rig);
+  const c = screenOf(rig, rig.cars[0].position.clone());
+  const before = rig.cam.params.tilt;
+  rig.el.fire('pointerdown', c.x - 60, c.y, 1);
+  rig.el.fire('pointerdown', c.x, c.y + 40, 2);
+  rig.el.fire('pointerdown', c.x + 60, c.y, 3);
+  for (let i = 1; i <= 10; i++) {
+    rig.el.fire('pointermove', c.x - 60, c.y + i * 12, 1);
+    rig.el.fire('pointermove', c.x, c.y + 40 + i * 12, 2);
+    rig.el.fire('pointermove', c.x + 60, c.y + i * 12, 3);
+    frame(rig, 1);
+  }
+  const after = rig.cam.params.tilt;
+  record(
+    'three fingers tilt the view, and it stays above the ground',
+    after !== before && after > 0 && after < Math.PI / 2,
+    `tilt ${THREE.MathUtils.radToDeg(before).toFixed(1)}° -> ${THREE.MathUtils.radToDeg(after).toFixed(1)}° from vertical`,
+  );
+}
+
 export async function run(): Promise<boolean> {
   console.log('the flick — its rules, driven through real events (ticket 18)\n');
   await check1_swipeStillPushes();
@@ -469,6 +497,7 @@ export async function run(): Promise<boolean> {
   await check7_tapStillSelectsInFlickMode();
   await check8_cameraReallyTakesTheCanvas();
   await check8b_cameraClaimEndsThePushGesture();
+  await check8c_threeFingersTiltTheView();
   await check9_oneFingerStillPushesAfterwards();
   const failed = results.filter((r) => !r.ok).length;
   console.log(

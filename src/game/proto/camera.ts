@@ -33,18 +33,37 @@ export interface CameraParams {
   zoom: number;
   /** Rotation around the Car, radians (0 = the fixed world heading). */
   yaw: number;
+  /**
+   * How far the view leans off straight-down, radians FROM VERTICAL: 0 is top
+   * down, larger values lower the camera toward the horizon. Default reproduces
+   * the old fixed framing exactly (atan2(back, height)).
+   */
+  tilt: number;
+  /** Set true if the rotation reads backwards; then it is a flip, not a rewrite. */
+  invertRotate: boolean;
   /** False once the player has panned: the camera stays where they left it. */
   following: boolean;
 }
 
+const DEFAULT_HEIGHT = 5.2;
+const DEFAULT_BACK = 1.8;
+
 export const DEFAULT_CAMERA_PARAMS: CameraParams = {
-  height: 5.2,
-  back: 1.8,
+  height: DEFAULT_HEIGHT,
+  back: DEFAULT_BACK,
   follow: 5,
   zoom: 1,
   yaw: 0,
+  tilt: Math.atan2(DEFAULT_BACK, DEFAULT_HEIGHT), // the old fixed framing, unchanged
   following: true,
+  invertRotate: false,
 };
+
+/** How much of a finger-drag becomes tilt (radians per CSS pixel). */
+const TILT_PER_PX = 0.005;
+/** Keep the camera above the ground: never past lying flat on it. */
+const TILT_MAX = 1.25; // ~72 deg from vertical
+const TILT_MIN = 0.03;
 
 /** Zoom limits: room enough to see a whole loop, not enough to lose the Car. */
 const ZOOM_MIN = 0.4;
@@ -148,7 +167,13 @@ export class CameraRig {
     let dAngle = angle - this.pinchAngle;
     if (dAngle > Math.PI) dAngle -= Math.PI * 2;
     if (dAngle < -Math.PI) dAngle += Math.PI * 2;
-    this.params.yaw -= dAngle;
+    /**
+     * The MAP follows the fingers, as every maps app does: twisting clockwise
+     * turns the map clockwise. The camera therefore orbits the other way round,
+     * which is a positive yaw (see `update`). It was the other way about when
+     * first built, and read as broken.
+     */
+    this.params.yaw += this.params.invertRotate ? -dAngle : dAngle;
 
     // Pan: the ground point under the midpoint is what slides under the fingers,
     // so measure the slide in WORLD units rather than guessing at pixels.
@@ -157,6 +182,18 @@ export class CameraRig {
     if (before && after) {
       const slide = before.clone().sub(after);
       this.target.add(slide); // drag the world this way; keep what we were looking at
+    }
+
+    // THREE fingers: slide them up or down to change the TILT. Dragging down
+    // lowers the camera toward the horizon, dragging up stands it back up over
+    // the Car — pulling the view down like pulling a camera down.
+    if (this.touches.size >= 3) {
+      const dy = mid.y - this.lastMidScreen.y;
+      this.params.tilt = THREE.MathUtils.clamp(
+        this.params.tilt + dy * TILT_PER_PX,
+        TILT_MIN,
+        TILT_MAX,
+      );
     }
 
     this.pinchDist = dist;
@@ -181,6 +218,7 @@ export class CameraRig {
   recentre(carPosition: THREE.Vector3): void {
     this.params.zoom = 1;
     this.params.yaw = 0;
+    this.params.tilt = DEFAULT_CAMERA_PARAMS.tilt;
     this.params.following = true;
     this.target.copy(carPosition);
   }
@@ -196,14 +234,17 @@ export class CameraRig {
       const k = 1 - Math.exp(-this.params.follow * dt);
       this.target.lerp(carPosition, k);
     }
-    const height = this.params.height * this.params.zoom;
-    const back = this.params.back * this.params.zoom;
-    // Rotate the whole offset around the target by the yaw the player chose, so
-    // rotation reads as orbiting the Car rather than spinning the map.
-    const offset = new THREE.Vector3(0, height, back).applyAxisAngle(
-      new THREE.Vector3(0, 1, 0),
-      this.params.yaw,
-    );
+    // One distance, one angle off vertical: zoom changes how far away we are,
+    // tilt changes how steeply we look down. (Previously both were scaled
+    // independently, which made tilt impossible to express.)
+    const dist = Math.hypot(this.params.height, this.params.back) * this.params.zoom;
+    const offset = new THREE.Vector3(
+      0,
+      Math.cos(this.params.tilt),
+      Math.sin(this.params.tilt),
+    )
+      .multiplyScalar(dist)
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.params.yaw);
     const desired = this.target.clone().add(offset);
     const k = this.params.following ? 1 - Math.exp(-this.params.follow * dt) : 1;
     cam.position.lerp(desired, this.gesturing ? 1 : k);
