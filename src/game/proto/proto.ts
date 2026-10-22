@@ -16,6 +16,8 @@ import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from '.
 import { setupSlingshot, type PushParams } from './slingshot.js';
 import { setupFlick, DEFAULT_FLICK_PARAMS, MARKER_LINGER, type FlickParams } from './flick.js';
 import { CameraRig, DEFAULT_CAMERA_PARAMS, type CameraParams } from './camera.js';
+import { setupLook, DEFAULT_LOOK, type LookParams } from './look.js';
+import { setChalkResolution, setChalkWidth } from './track.js';
 import { Rules, START_S } from './rules.js';
 import { createHud } from './hud.js';
 
@@ -43,6 +45,25 @@ export async function createProtoScene(game: Game): Promise<void> {
   const scene = game.scene;
   scene.background = new THREE.Color('#b9c6d4');
   scene.fog = new THREE.Fog('#b9c6d4', 40, 90);
+
+  // Ticket 20: tone mapping, an environment for metal and glass to reflect, and
+  // haze anchored to how far the camera ACTUALLY is (it used to be absolute, so
+  // zooming out put the whole world beyond `far` and washed it to sky colour).
+  const lookParams: LookParams = { ...DEFAULT_LOOK };
+  const look = setupLook(game, lookParams);
+  /** Chalk is a world-unit band now: the material must know the drawing size. */
+  function syncChalk(): void {
+    const size = new THREE.Vector2();
+    game.renderer.getSize(size);
+    setChalkResolution(size.x, size.y);
+  }
+  syncChalk();
+  setChalkWidth(lookParams.chalkWidth);
+  window.addEventListener('resize', syncChalk);
+  function applyLook(): void {
+    look.refresh();
+    persist();
+  }
 
   const hemi = new THREE.HemisphereLight('#dfe8f2', '#6b6f66', 1.1);
   scene.add(hemi);
@@ -509,6 +530,20 @@ export async function createProtoScene(game: Game): Promise<void> {
   }
   gui.add(fieldState, 'testField').onChange(setTestField);
 
+  // Look: every number here belongs to the user. Nothing was tuned by me — I
+  // cannot see the screen, so these defaults are conservative by design.
+  const lookFolder = gui.addFolder('Look');
+  lookFolder.add(lookParams, 'exposure', 0.4, 2, 0.02).onChange(applyLook);
+  lookFolder.add(lookParams, 'toneMapping').name('ACES tone mapping').onChange(applyLook);
+  lookFolder.add(lookParams, 'envIntensity', 0, 2, 0.05).name('reflections').onChange(applyLook);
+  lookFolder.add(lookParams, 'skyBrightness', 0, 2, 0.05).name('environment').onChange(applyLook);
+  lookFolder.add(lookParams, 'shadows').name('shadows (off = faster)').onChange(applyLook);
+  lookFolder.add(lookParams, 'haze', 0, 2, 0.05).onChange(applyLook);
+  lookFolder
+    .add(lookParams, 'chalkWidth', 0.01, 0.3, 0.005)
+    .name('chalk width (units)')
+    .onChange((v: number) => setChalkWidth(v));
+
   const camFolder = gui.addFolder('Camera');
   // Distance and angle are PINCH now, not sliders: the user asked for exactly
   // one way to frame the view, and the fingers do it better than a number box.
@@ -636,6 +671,9 @@ export async function createProtoScene(game: Game): Promise<void> {
     ring.scale.setScalar(carHalfWidth(car.params) + 0.07);
 
     cameraRig.update(dt, car.position);
+    // Haze follows whatever distance the camera chose, so depth reads the same
+    // from a bird's eye view and from 300 units up.
+    look.update(game.camera.position.distanceTo(car.position));
   });
 
   // Debug handle for the phone's remote console / tests (throwaway code).

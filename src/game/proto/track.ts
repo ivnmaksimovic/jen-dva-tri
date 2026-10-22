@@ -1,10 +1,19 @@
 import * as THREE from 'three';
+import { Line2 } from 'three/examples/jsm/lines/Line2.js';
+import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
+import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { terrainY } from './world.js';
 
 /**
  * THROWAWAY PROTOTYPE CODE — chalk Track: a rounded-rect loop 26×22 units
  * (≈2.6×2.2 m real), width 3 units, with checkpoints, a Rock, a Lake and a
- * Bridge on the sidewalk section. All chalk is white and thin (5 mm real).
+ * Bridge on the sidewalk section. All chalk is white, some millimetres thick.
+ *
+ * Chalk used to be `LineBasicMaterial`, which is one PIXEL wide however far you
+ * zoom: a hairline, not chalk. Lines here are `Line2` in `worldUnits`, so the
+ * band has the same real width at any zoom (ticket 20).
  */
 
 export interface Vec2 {
@@ -25,11 +34,33 @@ export interface PathPoint {
 export const TRACK_HALF_WIDTH = 1.5; // chalk lines 1.5 units from centerline
 export const CHALK_WIDTH = 0.05; // ~5 mm real chalk line width
 
-const chalkMat = new THREE.LineBasicMaterial({
-  color: '#f4f4ee',
+/**
+ * One material for all chalk: width in WORLD units, so zooming changes nothing
+ * about how thick the line is on the ground. Alpha-to-coverage gives the edges
+ * some bite without sorting problems.
+ */
+const chalkMat = new LineMaterial({
+  color: new THREE.Color('#f4f4ee').getHex(),
+  linewidth: CHALK_WIDTH,
+  worldUnits: true,
   transparent: true,
-  opacity: 0.92,
+  opacity: 0.95,
+  alphaToCoverage: true,
+  depthWrite: false,
 });
+
+/**
+ * `LineMaterial` needs the drawing buffer size to rasterise; without this the
+ * lines are wrong (or invisible) depending on the device pixel ratio.
+ */
+export function setChalkResolution(width: number, height: number): void {
+  chalkMat.resolution.set(width, height);
+}
+
+/** Change chalk thickness live (tunable: nobody knows the right number yet). */
+export function setChalkWidth(units: number): void {
+  chalkMat.linewidth = Math.max(0.001, units);
+}
 
 function roundedRectPath(): Vec2[] {
   // Rectangle x∈[0,26] z∈[0,22], corner radius 6, sampled every ~6°.
@@ -66,9 +97,28 @@ function offsetPolyline(pts: Vec2[], d: number): Vec2[] {
   });
 }
 
-function chalkLine(points: THREE.Vector3[]): THREE.Line {
-  const geom = new THREE.BufferGeometry().setFromPoints(points);
-  return new THREE.Line(geom, chalkMat);
+function chalkLine(points: THREE.Vector3[]): Line2 {
+  const geom = new LineGeometry();
+  const flat: number[] = [];
+  for (const p of points) flat.push(p.x, p.y, p.z);
+  geom.setPositions(flat);
+  const line = new Line2(geom, chalkMat);
+  // A wide band needs correct bounds or it disappears when its centre goes
+  // off-screen while part of it is still in view.
+  line.computeLineDistances();
+  line.frustumCulled = false;
+  return line;
+}
+
+/** Segment soup (Lake hatching, Bridge diagonals) — the same width, in units. */
+function chalkSegments(points: THREE.Vector3[]): LineSegments2 {
+  const geom = new LineSegmentsGeometry();
+  const flat: number[] = [];
+  for (const p of points) flat.push(p.x, p.y, p.z);
+  geom.setPositions(flat);
+  const segs = new LineSegments2(geom, chalkMat);
+  segs.frustumCulled = false;
+  return segs;
 }
 
 export class Track {
@@ -209,8 +259,7 @@ export class Track {
           hatched.push(new THREE.Vector3(cx + nx + SQ2 * tt, y, cz + nz + SQ2 * tt));
         }
       }
-      const geom = new THREE.BufferGeometry().setFromPoints(hatched);
-      this.chalk.add(new THREE.LineSegments(geom, chalkMat));
+      this.chalk.add(chalkSegments(hatched));
     }
 
     // Bridge: rectangle outline + diagonals in BOTH directions, on the sidewalk.
@@ -240,8 +289,7 @@ export class Track {
           segs.push(new THREE.Vector3(c - zc, y, zc), new THREE.Vector3(c - zd, y, zd));
         }
       }
-      const geom = new THREE.BufferGeometry().setFromPoints(segs);
-      this.chalk.add(new THREE.LineSegments(geom, chalkMat));
+      this.chalk.add(chalkSegments(segs));
     }
   }
 

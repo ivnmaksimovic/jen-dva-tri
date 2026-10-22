@@ -12,6 +12,7 @@
     "check:cars": "node scripts/headless-check.mjs src/game/proto/checks/multi-car.ts",
     "check:surfaces": "node scripts/headless-check.mjs src/game/proto/checks/surfaces.ts",
     "check:gesture": "node scripts/headless-check.mjs src/game/proto/checks/gesture.ts",
+    "check:look": "node scripts/headless-check.mjs src/game/proto/checks/look.ts",
     "check:flick": "node scripts/headless-check.mjs src/game/proto/checks/flick.ts",
     "check:roughness": "node scripts/headless-check.mjs src/game/proto/checks/roughness.ts",
     "check:finger": "node scripts/headless-check.mjs src/game/proto/checks/finger.ts"
