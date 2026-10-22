@@ -68,6 +68,28 @@ Already settled elsewhere (do not re-ask):
   position change. Worth carrying generally: assert the effect you wanted, not
   whatever side effects came free with it.
 
+## Second round of phone feedback (2026-10-20)
+
+- **Rotation was backwards.** it spun the map against the fingers. Now the MAP
+  follows the fingers, as maps apps do (`yaw += dAngle`). An "invert rotation"
+  switch exists so getting this wrong is one click, not one round trip.
+- **Tilt is now controllable** — two fingers were already twist+pan+pinch, so a
+  third finger drags tilt: down lowers the camera toward the horizon, up stands
+  it back overhead. Internally two distances became ONE distance plus ONE angle
+  off vertical, which is what made tilt expressible at all. Default reproduces
+  the previous framing exactly (19.1 deg off vertical).
+- Wiring it up also answered one of the ticket's open questions by doing it: yes,
+  you can see the whole Track at max zoom out. Whether that changes how the game
+  reads is still open, and is a playing question rather than a building one.
+
+## Knuckle visibility (ticket 18 side-quest, same reason)
+
+The flick can draw the finger: **wire** (see through it to the Car) or **solid**.
+Default off, in the Flick folder as "show the knuckle". It exists so questions
+like "why does catching the side turn it easily but a rear-corner flick not much"
+can be answered by LOOKING at contact rather than reasoning about it. Drawn from
+the body's own pose, and it dies with the gesture like everything else does.
+
 ## Open questions (still small, still for after testing)
 
 - Recentre at all, or is it noise once panning works? (currently "yes, but not
