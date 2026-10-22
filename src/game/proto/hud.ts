@@ -9,6 +9,9 @@ export function createHud(
   onNextTurn: () => void,
   onReset: () => void,
   onSetMode: (mode: Mode) => void,
+  /** Recentre the camera. It belongs on screen: once you have moved the view it
+   *  is part of playing, not a setting behind a menu. */
+  onRecentre: () => void,
 ): Hud {
   const root = document.createElement('div');
   root.style.cssText = `
@@ -93,7 +96,10 @@ export function createHud(
   nextTurnBtn.textContent = 'Next Turn';
   const resetBtn = document.createElement('button');
   resetBtn.textContent = 'Reset Cars';
-  for (const b of [nextTurnBtn, resetBtn]) {
+  const recentreBtn = document.createElement('button');
+  recentreBtn.textContent = '\u21BB Camera';
+  recentreBtn.title = 'Back to the default view over the selected Car';
+  for (const b of [nextTurnBtn, resetBtn, recentreBtn]) {
     b.style.cssText = btnStyle;
     actions.appendChild(b);
   }
@@ -117,6 +123,7 @@ export function createHud(
   });
   nextTurnBtn.addEventListener('click', () => onNextTurn());
   resetBtn.addEventListener('click', () => onReset());
+  recentreBtn.addEventListener('click', () => onRecentre());
 
   const hud: Hud = {
     flash(text: string): void {

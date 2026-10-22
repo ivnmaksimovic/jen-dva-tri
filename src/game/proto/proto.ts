@@ -200,6 +200,11 @@ export async function createProtoScene(game: Game): Promise<void> {
       hud.flash('Cars back on the grid');
     },
     (m) => rulesRef.rules?.setMode(m),
+    () => {
+      cameraRig.recentre(getCar().position);
+      persist();
+      hud.flash('Camera back on the Car');
+    },
   );
   const rules = new Rules(
     track,
@@ -243,7 +248,7 @@ export async function createProtoScene(game: Game): Promise<void> {
   const scheme = { active: flickParams.on ? 'flick' : 'slingshot' };
   const flickActive = (): boolean => scheme.active === 'flick';
 
-  setupSlingshot(
+  const slingInput = setupSlingshot(
     game,
     getCar,
     () => cars,
@@ -298,8 +303,10 @@ export async function createProtoScene(game: Game): Promise<void> {
   strikeMark.visible = false;
   scene.add(strikeMark);
   let strikeAge = 0;
+  /** Where on the aimed Car the last strike landed, in that Car's own frame. */
+  let strikeLocal = new THREE.Vector3();
 
-  setupFlick(
+  const flickInput = setupFlick(
     game,
     world,
     getCar,
@@ -310,6 +317,9 @@ export async function createProtoScene(game: Game): Promise<void> {
     (reason) => hud.flash(reason),
     () => rules.canPush() && flickActive(),
     (point) => {
+      // Remembered in the CAR's frame, not the world's: the point of the mark
+      // is to see where this Car was caught, including while it rolls away.
+      strikeLocal = point.clone().sub(getCar().position).applyQuaternion(getCar().quaternion.clone().invert());
       strikeMark.position.copy(point);
       strikeMark.visible = true;
       strikeAge = 0;
@@ -328,12 +338,13 @@ export async function createProtoScene(game: Game): Promise<void> {
    * scheme thought it owned the touch is told to drop it — otherwise a pinch
    * aimed at the view would also start dragging a Car.
    */
-  function cancelGameGestures(ids: number[]): void {
-    for (const id of ids) {
-      const el = game.renderer.domElement;
-      const evt = new PointerEvent('pointercancel', { pointerId: id });
-      el.dispatchEvent(evt);
-    }
+  /**
+   * The camera took the canvas mid-gesture. Tell whichever layer owns it, by
+   * CALLING it — never by posting an event everyone (including the camera) hears.
+   */
+  function cancelGameGestures(): void {
+    if (flickActive()) flickInput?.cancel();
+    else slingInput?.cancel();
   }
   const cameraRig = new CameraRig(game, camParams, cancelGameGestures);
 
@@ -584,6 +595,13 @@ export async function createProtoScene(game: Game): Promise<void> {
     // The strike marker outlives the gesture, then goes: nothing here is a
     // permanent mark on the world.
     if (strikeMark.visible) {
+      // Ride Aboard the Car: the mark is about this Car, so it goes where the
+      // Car goes and turns with it.
+      const parked = getCar();
+      strikeMark.position
+        .copy(strikeLocal)
+        .applyQuaternion(parked.quaternion)
+        .add(parked.position);
       strikeAge += dt;
       strikeMark.material.opacity = Math.max(0, 1 - strikeAge / MARKER_LINGER);
       if (strikeAge >= MARKER_LINGER) strikeMark.visible = false;

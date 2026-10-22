@@ -139,6 +139,7 @@ async function makeRig(): Promise<Rig> {
   // Imported after `document` exists: the aim overlay builds canvas textures.
   const { setupSlingshot } = await import('../slingshot.js');
   const { setupFlick } = await import('../flick.js');
+  let flick: { cancel(): void } | undefined;
 
   const scene = new THREE.Scene();
   const world = new RAPIER.World({ x: 0, y: -GRAVITY, z: 0 });
@@ -199,7 +200,7 @@ async function makeRig(): Promise<Rig> {
     () => release(rig.owner),
     () => !rig.flickOn, // enabled: hear NOTHING while the flick is live
   );
-  setupFlick(
+  flick = setupFlick(
     host,
     world,
     () => cars[rig.active],
@@ -224,8 +225,8 @@ async function makeRig(): Promise<Rig> {
 
   // The camera rides the same canvas (ticket 19). Two fingers are ITS claim,
   // and when it claims, whatever the game thought it owned has to be released.
-  rig.cam = new CameraRig(host, { ...DEFAULT_CAMERA_PARAMS }, (ids) => {
-    for (const id of ids) rig.el.fire('pointercancel', 0, 0, id);
+  rig.cam = new CameraRig(host, { ...DEFAULT_CAMERA_PARAMS }, () => {
+    flick?.cancel();
   });
 
   frame(rig, 2); // Rapier's query pipeline fills on the first step
@@ -393,7 +394,37 @@ async function check7_tapStillSelectsInFlickMode(): Promise<void> {
  *    take the canvas mid-gesture: a pinch aimed at the view must not also drag
  *    the Car the first finger happened to have started on.
  */
-async function check8_cameraClaimsTwoFingers(): Promise<void> {
+async function check8_cameraReallyTakesTheCanvas(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  syncView(rig);
+  const centre = screenOf(rig, rig.cars[0].position.clone());
+  // Two fingers spreading apart: a pinch to zoom OUT from the camera's view.
+  const beforeZoom = rig.cam.params.zoom;
+  const camBefore = rig.camera.position.clone();
+  rig.el.fire('pointerdown', centre.x - 60, centre.y, 1);
+  rig.el.fire('pointerdown', centre.x + 60, centre.y, 2);
+  for (let i = 1; i <= 8; i++) {
+    const spread = 60 + i * 10;
+    rig.el.fire('pointermove', centre.x - spread, centre.y, 1);
+    rig.el.fire('pointermove', centre.x + spread, centre.y, 2);
+    frame(rig, 1);
+  }
+  const zoomed = rig.cam.params.zoom !== beforeZoom;
+  const moved =
+    rig.camera.position.distanceTo(camBefore) > 0.05 && !rig.cam.params.following;
+  rig.el.fire('pointerup', centre.x - 140, centre.y, 1);
+  rig.el.fire('pointerup', centre.x + 140, centre.y, 2);
+  frame(rig, 180);
+  record(
+    'two fingers ACTUALLY move the camera (not merely unfollow it)',
+    zoomed && moved && rig.pushed === 0,
+    `zoom ${beforeZoom.toFixed(2)} -> ${rig.cam.params.zoom.toFixed(2)}, camera moved ${(rig.camera.position.distanceTo(camBefore) * 10).toFixed(1)} cm, following ${rig.cam.params.following}, Pushes ${rig.pushed}`,
+  );
+}
+
+/** 8b. The mirror of it: taking the canvas must also end the game's gesture. */
+async function check8b_cameraClaimEndsThePushGesture(): Promise<void> {
   const rig = await makeRig();
   if (!settle(rig)) throw new Error('Cars never came to rest');
   syncView(rig);
@@ -401,27 +432,20 @@ async function check8_cameraClaimsTwoFingers(): Promise<void> {
   const b = screenOf(rig, rig.cars[0].position.clone().add(new THREE.Vector3(0.7, 0, 0)));
   rig.el.fire('pointerdown', a.x, a.y, 1);
   frame(rig, 2);
-  // Second finger down: the camera takes it and the flick must be dropped.
-  rig.el.fire('pointerdown', b.x, b.y, 2);
-  const cancelled = rig.pushed === 0 && !rig.cam.params.following;
+  rig.el.fire('pointerdown', b.x, b.y, 2); // camera claims
   for (let i = 1; i <= 12; i++) {
-    // Sweep the FIRST finger through the Car anyway, as a pinch would drag it.
     rig.el.fire('pointermove', a.x + ((b.x - a.x) * i) / 12, a.y + ((b.y - a.y) * i) / 12, 1);
     frame(rig, 1);
   }
   rig.el.fire('pointerup', b.x, b.y, 1);
   frame(rig, 180);
   record(
-    'two fingers claim the canvas for the camera and the game gesture is dropped',
-    cancelled && rig.pushed === 0,
-    `Pushes ${rig.pushed}, camera took over: ${cancelled}, following again: ${rig.cam.params.following}`,
+    'the camera taking the canvas also ends the Push gesture it interrupted',
+    rig.pushed === 0,
+    `Pushes ${rig.pushed}, refusals [${rig.refused.join('; ')}]`,
   );
 }
 
-/**
- * 9. And afterwards the canvas goes back: one finger still Pushes. A camera
- *    gesteasure that left the game permanently deaf would be worse than none.
- */
 async function check9_oneFingerStillPushesAfterwards(): Promise<void> {
   const rig = await makeRig();
   if (!settle(rig)) throw new Error('Cars never came to rest');
@@ -443,7 +467,8 @@ export async function run(): Promise<boolean> {
   await check5_theOtherSchemeStaysDeaf();
   await check6_noLiesFromTheIdleScheme();
   await check7_tapStillSelectsInFlickMode();
-  await check8_cameraClaimsTwoFingers();
+  await check8_cameraReallyTakesTheCanvas();
+  await check8b_cameraClaimEndsThePushGesture();
   await check9_oneFingerStillPushesAfterwards();
   const failed = results.filter((r) => !r.ok).length;
   console.log(

@@ -75,7 +75,7 @@ export function setupFlick(
    */
   claimGesture?: (pointerId: number) => boolean,
   releaseGesture?: () => void,
-): void {
+): { cancel(): void } {
   const raycaster = new THREE.Raycaster();
   const ndc = new THREE.Vector2();
   const el = game.renderer.domElement;
@@ -251,6 +251,13 @@ export function setupFlick(
     onStrike(strikePoint);
     onPush();
   });
+
+  return {
+    /** The camera took the canvas: this gesture is over, strike or no strike. */
+    cancel(): void {
+      endGesture();
+    },
+  };
 }
 
 export { MARKER_LINGER };

@@ -97,7 +97,7 @@ export function setupSlingshot(
    * touching anything: not listening means not hearing at all.
    */
   enabled?: () => boolean,
-): void {
+): { cancel(): void } {
   const raycaster = new THREE.Raycaster();
   const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0); // ground plane y=0
   const ndc = new THREE.Vector2();
@@ -318,6 +318,17 @@ export function setupSlingshot(
   }
 
   el.addEventListener('pointerup', finish);
+  return {
+    /** The camera took the canvas: this aim is over, mid-gesture or not. */
+    cancel(): void {
+      if (!dragging) return;
+      dragging = false;
+      dragVec.set(0, 0, 0);
+      arrow.visible = false;
+      marker.visible = false;
+      releaseGesture?.();
+    },
+  };
   el.addEventListener('pointercancel', () => {
     dragging = false;
     releaseGesture?.();

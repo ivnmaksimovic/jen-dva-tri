@@ -70,8 +70,13 @@ export class CameraRig {
      * Called when a camera gesture begins, so whichever Push scheme owns the
      * canvas can drop the gesture it thought it had. Two fingers is a claim the
      * game layer cannot refuse.
+     *
+     * NOT a synthetic pointercancel on the canvas: the first attempt did that,
+     * and this very rig then heard the event too, deleted both fingers and
+     * killed its own gesture before it began. Cancelling must be a call to the
+     * layer, never a message posted to everyone.
      */
-    private readonly onClaim: (pointerIds: number[]) => void,
+    private readonly onClaim: () => void,
   ) {
     const el = game.renderer.domElement;
     el.addEventListener('pointerdown', (e) => this.down(e));
@@ -106,7 +111,7 @@ export class CameraRig {
     this.gesturing = true;
     this.params.following = false;
     this.beginPinch();
-    this.onClaim([...this.touches.keys()]);
+    this.onClaim();
   }
 
   private beginPinch(): void {
