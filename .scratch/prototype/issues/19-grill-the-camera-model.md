@@ -50,6 +50,24 @@ Already settled elsewhere (do not re-ask):
   loop is visible. Whether being able to see everything changes how the game
   reads is one of the questions left for playing.
 
+## Bugs the first phone test found (2026-10-20)
+
+- **The camera did nothing but stop following.** It told the game to let go by
+  posting a `pointercancel` to the canvas — and then its OWN listener heard that
+  same event, deleted both fingers, and ended the gesture before it began. So
+  the visible effect was exactly "following stopped, camera frozen". Cancelling
+  must be a CALL to the layer that owns the gesture (`setupSlingshot` and
+  `setupFlick` now return a cancel handle), never a broadcast message: a module
+  that posts to everyone has to remember it is one of the listeners.
+- **Recentre was in the wrong place**: buried in the GUI, unusable mid-play. It
+  is now a button on the main HUD beside Next Turn. Camera control is part of
+  play, not set-up.
+- **The headless check had the same blind spot**: it asserted "stopped following
+  and Pushed nothing" instead of "the camera moved", so it went green while the
+  feature was dead. It now drives a real pinch and demands that zoom AND camera
+  position change. Worth carrying generally: assert the effect you wanted, not
+  whatever side effects came free with it.
+
 ## Open questions (still small, still for after testing)
 
 - Recentre at all, or is it noise once panning works? (currently "yes, but not
