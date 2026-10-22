@@ -300,6 +300,22 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
     contact point, its normal and its impulse — how you AUDIT where a strike
     landed instead of believing where you aimed.
 
+- Ticket 20 — **LOOK (2026-10-22, agent-chosen while the user slept).** The hint
+  was "it does not look great", and the fix chosen was to make it look like
+  itself. Four real defects, none of them taste:
+  - **Chalk had no width**: `LineBasicMaterial` is 1 PIXEL at any zoom. The
+    intended width already existed as `CHALK_WIDTH = 0.05` (5 mm) and the
+    renderer ignored it. Now `Line2` in world units — real chalk, same width at
+    every zoom. This is the one most likely to change how it reads.
+  - **No tone mapping** (highlights clipped flat) and **no environment** (metal
+    and glass had nothing to reflect): both renderer-level, both standard.
+  - **Fog was absolute** at 40–90 units, so with zoom now reaching x60 the whole
+    world sat past `far` and faded to sky exactly when you zoom out to see it.
+    Haze now follows the camera distance.
+  Everything tunable in a new Look folder; defaults conservative because nobody
+  here can see the screen. New `pnpm check:look` counts draw calls instead of
+  trusting us: **36 drawable objects, 18 materials, one material for all chalk.**
+
 - Ticket 18 is **PLAYABLE**: `pnpm dev` → GUI → Control scheme (A / C) → Flick.
   Tunables exposed live (maxAccel = strength, finger mass, penetration budget,
   knuckle dimensions), strike marked for 2 s, and `pnpm check:flick` guards the
