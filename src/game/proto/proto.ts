@@ -259,7 +259,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     () => rules.canPush(), // the Turn budget: its own question, not the switch
     claimGesture,
     releaseGesture,
-    () => !flickActive(), // slingshot mode only: otherwise hear nothing at all
+    () => !flickActive() && !cameraBusy, // its turn OR the camera's, never both
   );
 
   /**
@@ -326,7 +326,7 @@ export async function createProtoScene(game: Game): Promise<void> {
     },
     (text, illegal) => hud.setStrike(text, illegal),
     stepHooks.add.bind(stepHooks),
-    flickActive,
+    () => flickActive() && !cameraBusy,
     claimGesture,
     releaseGesture,
   );
@@ -342,11 +342,21 @@ export async function createProtoScene(game: Game): Promise<void> {
    * The camera took the canvas mid-gesture. Tell whichever layer owns it, by
    * CALLING it — never by posting an event everyone (including the camera) hears.
    */
-  function cancelGameGestures(): void {
+  /**
+   * While the camera holds the canvas the Push schemes are OUT, not merely
+   * cancelled: a third finger arriving mid-pinch used to start a brand new
+   * finger under it, which is how the knuckle turned up under somebody's thumb.
+   */
+  let cameraBusy = false;
+  function takeCanvas(): void {
+    cameraBusy = true;
     if (flickActive()) flickInput?.cancel();
     else slingInput?.cancel();
   }
-  const cameraRig = new CameraRig(game, camParams, cancelGameGestures);
+  function giveCanvasBack(): void {
+    cameraBusy = false;
+  }
+  const cameraRig = new CameraRig(game, camParams, takeCanvas, giveCanvasBack);
 
   game.camera.position.set(track.pointAt(START_S).x, camParams.height, 2);
 
@@ -500,19 +510,11 @@ export async function createProtoScene(game: Game): Promise<void> {
   gui.add(fieldState, 'testField').onChange(setTestField);
 
   const camFolder = gui.addFolder('Camera');
-  camFolder.add(camParams, 'height', 2, 14, 0.1).name('default height').onFinishChange(persist);
-  camFolder.add(camParams, 'back', 0, 8, 0.1).name('default back').onFinishChange(persist);
+  // Distance and angle are PINCH now, not sliders: the user asked for exactly
+  // one way to frame the view, and the fingers do it better than a number box.
+  // The values still lurk in `camParams` because Recentre needs them.
   camFolder.add(camParams, 'follow', 0, 12, 0.5).name('follow rate').onFinishChange(persist);
-  camFolder.add(camParams, 'zoom', 0.4, 2.5, 0.01).name('zoom').onFinishChange(persist);
   camFolder.add(camParams, 'following').name('follow aimed Car').onFinishChange(persist);
-  const tiltUi = { deg: THREE.MathUtils.radToDeg(camParams.tilt) };
-  camFolder
-    .add(tiltUi, 'deg', 2, 72, 1)
-    .name('tilt off vertical (deg)')
-    .onChange((v: number) => {
-      camParams.tilt = THREE.MathUtils.degToRad(v);
-      persist();
-    });
   // Wrong-direction guess? This is one click instead of one round trip with me.
   camFolder.add(camParams, 'invertRotate').name('invert rotation').onChange(persist);
   camFolder

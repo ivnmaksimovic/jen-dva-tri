@@ -97,6 +97,8 @@ interface Rig {
   flickOn: boolean;
   /** The camera RIG (not the Three camera): two fingers belong to it. */
   cam: CameraRig;
+  /** True while the camera holds the canvas; the Push schemes must stay out. */
+  cameraBusy: boolean;
 }
 
 const results: { name: string; ok: boolean; detail: string }[] = [];
@@ -173,6 +175,7 @@ async function makeRig(): Promise<Rig> {
     picked: [],
     active: 0,
     flickOn: true,
+    cameraBusy: false,
   } as unknown as Rig;
   const host = {
     scene,
@@ -225,9 +228,17 @@ async function makeRig(): Promise<Rig> {
 
   // The camera rides the same canvas (ticket 19). Two fingers are ITS claim,
   // and when it claims, whatever the game thought it owned has to be released.
-  rig.cam = new CameraRig(host, { ...DEFAULT_CAMERA_PARAMS }, () => {
-    flick?.cancel();
-  });
+  rig.cam = new CameraRig(
+    host,
+    { ...DEFAULT_CAMERA_PARAMS },
+    () => {
+      rig.cameraBusy = true; // the camera owns the canvas now
+      flick?.cancel();
+    },
+    () => {
+      rig.cameraBusy = false;
+    },
+  );
 
   frame(rig, 2); // Rapier's query pipeline fills on the first step
   return rig;
@@ -486,6 +497,41 @@ async function check8c_threeFingersTiltTheView(): Promise<void> {
   );
 }
 
+/**
+ * 8d. While the camera holds the canvas, a LATER finger must not start a new
+ *     flick under it. This is the bug the phone found: a three-finger tilt
+ *     gesture kept summoning a knuckle beneath whichever finger arrived last.
+ */
+async function check8d_noFingerAppearsUnderTheCameraGesture(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  syncView(rig);
+  const c = screenOf(rig, rig.cars[0].position.clone());
+  const car = rig.cars[0];
+  rig.el.fire('pointerdown', c.x - 60, c.y, 1);
+  rig.el.fire('pointerdown', c.x, c.y + 40, 2); // camera claims here
+  rig.el.fire('pointerdown', c.x + 60, c.y, 3); // late finger: must be ignored
+  const through = screenOf(rig, car.position.clone().add(new THREE.Vector3(-0.7, 0, 0)));
+  const past = screenOf(rig, car.position.clone().add(new THREE.Vector3(0.7, 0, 0)));
+  for (let i = 1; i <= 14; i++) {
+    // Sweep that late finger clean THROUGH the Car, the way a flick would.
+    rig.el.fire(
+      'pointermove',
+      through.x + ((past.x - through.x) * i) / 14,
+      through.y + ((past.y - through.y) * i) / 14,
+      3,
+    );
+    frame(rig, 1);
+  }
+  rig.el.fire('pointerup', past.x, past.y, 3);
+  frame(rig, 180);
+  record(
+    'a finger arriving after the camera took the canvas starts nothing',
+    rig.pushed === 0 && rig.cameraBusy,
+    `Pushes ${rig.pushed}, camera still holds the canvas ${rig.cameraBusy}`,
+  );
+}
+
 export async function run(): Promise<boolean> {
   console.log('the flick — its rules, driven through real events (ticket 18)\n');
   await check1_swipeStillPushes();
@@ -498,6 +544,7 @@ export async function run(): Promise<boolean> {
   await check8_cameraReallyTakesTheCanvas();
   await check8b_cameraClaimEndsThePushGesture();
   await check8c_threeFingersTiltTheView();
+  await check8d_noFingerAppearsUnderTheCameraGesture();
   await check9_oneFingerStillPushesAfterwards();
   const failed = results.filter((r) => !r.ok).length;
   console.log(

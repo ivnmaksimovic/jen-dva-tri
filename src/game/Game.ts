@@ -27,7 +27,9 @@ export class Game {
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     container.appendChild(this.renderer.domElement);
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 100);
+    // Far plane wide enough to zoom out over a whole Track: the camera can now go
+    // dozens of world units up, and 100 clipped the world away at that distance.
+    this.camera = new THREE.PerspectiveCamera(60, 1, 0.05, 4000);
     this.camera.position.set(0, 0.6, 3);
     this.camera.lookAt(0, 0, 0);
 
