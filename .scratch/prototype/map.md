@@ -356,6 +356,11 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   finger = the game, two fingers = the camera.** Push-the-phone (B) keeps its
   own behind-the-Car camera.
 
+**When this effort ends:** everything worth keeping has been written up in
+`.scratch/v1/handover-from-v0.md` (2026-10-23) — a handover written specifically
+for whoever grills the real game out of this prototype. If this directory is ever
+deleted, that file is the survivor.
+
 **Session state: v0 slingshot slice BUILT and feel-tuned through two feel
 passes (commits a2d276b → 5475802 → c7fa5e1; onboarding docs d1a8334), several
 Cars on the Track (ticket 12, RESOLVED 2026-10-09), and now spatial Surfaces

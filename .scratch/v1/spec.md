@@ -135,3 +135,12 @@ being drawn rather than generated belongs to that milestone, not to the core.
 | 04 | Reusable core — world, Car, Surface/tire, Push port | task | ready-for-agent | 01 |
 
 Everything else lives as the coarse list above.
+
+## Read this before touching v1
+
+**`handover-from-v0.md`** (next to this file) is the bridge out of the prototype:
+what actually exists, which decisions were settled by play and should not be
+re-grilled, the graveyard of approaches that were tried and cost real time, the
+repo traps, and the questions nobody has thought to ask yet. It is deliberately
+not a spec or a plan — it has no answers in it — but grilling v1 without it means
+rediscovering a lot of expensive things by accident.
