@@ -437,7 +437,7 @@ Round 1:
 
 Round 2 (rules — settled language lives in GLOSSARY.md):
 
-- Push: quick strike only; riding illegal; curve Push legal; Car fully at
+- Push: quick strike only; riding illegal if too long; Car fully at
   rest before the next Push.
 - Out of Track: 3+ wheels fully beyond a Boundary; any wheel part touching
   the line is in.

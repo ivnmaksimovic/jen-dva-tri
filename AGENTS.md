@@ -10,7 +10,8 @@ New to the project? Read in order: `README.md` (state + pointers) →
 `GLOSSARY.md` (the game's language) → the newest `.scratch/*/map.md`
 (active effort: decisions so far, open fog, roadmap). Build notes in each
 map record the engineering lessons (physics scale, timestep, rejected
-approaches) — read them before changing physics or controls.
+approaches) — read them before changing physics or controls. But also don't 
+take those as hard rules.
 
 "Do the next thing" = run the frontier scan: `.scratch/*/issues/` for
 open tickets, first by number wins (see `docs/agents/issue-tracker.md`).

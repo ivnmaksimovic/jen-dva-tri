@@ -11,8 +11,7 @@ labelled as a judgement. Where it is a judgement it says so, because the session
 may want to overrule it.
 
 Read next to: `GLOSSARY.md`, `docs/adr/0001-full-3d-physics.md`,
-`docs/adr/0002-grip-is-a-contact-property.md`, `.scratch/v1/spec.md`, and — if
-you can spare the tokens — `.scratch/prototype/map.md`, whose build notes are the
+`docs/adr/0002-grip-is-a-contact-property.md`, `.scratch/v1/spec.md`, and if you need history search in `.scratch/prototype/map.md`, whose build notes are the
 richest record of *why* anything is the way it is.
 
 ---
