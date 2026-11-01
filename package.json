@@ -15,7 +15,8 @@
     "check:look": "node scripts/headless-check.mjs src/game/proto/checks/look.ts",
     "check:flick": "node scripts/headless-check.mjs src/game/proto/checks/flick.ts",
     "check:roughness": "node scripts/headless-check.mjs src/game/proto/checks/roughness.ts",
-    "check:finger": "node scripts/headless-check.mjs src/game/proto/checks/finger.ts"
+    "check:finger": "node scripts/headless-check.mjs src/game/proto/checks/finger.ts",
+    "check:knuckle": "node scripts/headless-check.mjs src/game/proto/checks/knuckle.ts"
   },
   "dependencies": {
     "@capacitor/android": "^8.5.2",

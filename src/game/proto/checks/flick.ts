@@ -128,6 +128,18 @@ function screenOf(rig: Rig, p: THREE.Vector3): { x: number; y: number } {
   return { x: ((ndc.x + 1) / 2) * VIEW.w, y: ((1 - ndc.y) / 2) * VIEW.h };
 }
 
+/**
+ * The drawn knuckle: the newest mesh in the scene, added when a gesture starts
+ * and removed when it ends — the only view of the input layer's private body.
+ */
+function knuckle(rig: Rig): THREE.Mesh | null {
+  for (let i = rig.scene.children.length - 1; i >= 0; i--) {
+    const child = rig.scene.children[i] as THREE.Mesh;
+    if (child.isMesh) return child;
+  }
+  return null;
+}
+
 function settle(rig: Rig, maxFrames = 1500): boolean {
   for (let n = 0; n < maxFrames; n++) {
     frame(rig);
@@ -212,7 +224,9 @@ async function makeRig(): Promise<Rig> {
       rig.active = cars.indexOf(picked);
       rig.picked.push(picked);
     },
-    { ...DEFAULT_FLICK_PARAMS },
+    // The knuckle is DRAWN here so the input layer can be watched through it:
+    // where the drawn knuckle is, is what the player aims with.
+    { ...DEFAULT_FLICK_PARAMS, fingerView: 'solid' },
     () => {
       rig.pushed += 1;
     },
@@ -532,6 +546,47 @@ async function check8d_noFingerAppearsUnderTheCameraGesture(): Promise<void> {
   );
 }
 
+/**
+ * 10. CLICK AND HOLD. The desktop bug the user hit: press the button, move
+ *     nothing, and the knuckle leaves — because nothing had told it where the
+ *     touch wanted it, so it chased the world origin until a move arrived. A
+ *     gesture that has not moved must hold still. Measured in PIXELS, because
+ *     pixels are what the player is aiming with. The knuckle is only visible
+ *     while a gesture lives, and `fingerView` above is what makes it observable.
+ */
+async function check10_holdingThePointerStillGoesNowhere(): Promise<void> {
+  const rig = await makeRig();
+  if (!settle(rig)) throw new Error('Cars never came to rest');
+  syncView(rig);
+  const restY = rig.cars[rig.active].position.y;
+  // In front of the camera and clear of both Cars (they sit at x = ±1.2, z = 0).
+  const at = new THREE.Vector3(-0.6, restY, -0.8);
+  const pressed = screenOf(rig, at);
+  rig.el.fire('pointerdown', pressed.x, pressed.y, 1);
+  let worstPx = 0;
+  let worstWorld = 0;
+  let worstY = 0;
+  let seen = 0;
+  for (let n = 0; n < 30; n++) {
+    frame(rig, 1);
+    syncView(rig);
+    const k = knuckle(rig);
+    if (!k) continue;
+    seen++;
+    const shown = screenOf(rig, k.position);
+    worstPx = Math.max(worstPx, Math.hypot(shown.x - pressed.x, shown.y - pressed.y));
+    worstWorld = Math.max(worstWorld, k.position.distanceTo(at));
+    worstY = Math.max(worstY, Math.abs(k.position.y - restY));
+  }
+  rig.el.fire('pointerup', pressed.x, pressed.y, 1);
+  record(
+    'pressing and holding moves nothing: the knuckle stays under the pointer',
+    seen === 30 && worstWorld < 0.001 && worstY < 1e-6,
+    `knuckle seen on ${seen}/30 frames, worst departure ${worstPx.toFixed(1)} px = ${(worstWorld * 100).toFixed(1)} mm ` +
+      `(budget 3 px), worst Y drift ${(worstY * 100).toFixed(2)} mm`,
+  );
+}
+
 export async function run(): Promise<boolean> {
   console.log('the flick — its rules, driven through real events (ticket 18)\n');
   await check1_swipeStillPushes();
@@ -546,6 +601,7 @@ export async function run(): Promise<boolean> {
   await check8c_threeFingersTiltTheView();
   await check8d_noFingerAppearsUnderTheCameraGesture();
   await check9_oneFingerStillPushesAfterwards();
+  await check10_holdingThePointerStillGoesNowhere();
   const failed = results.filter((r) => !r.ok).length;
   console.log(
     `\n${results.length - failed}/${results.length} checks passed` +

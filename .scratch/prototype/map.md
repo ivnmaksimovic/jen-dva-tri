@@ -509,6 +509,43 @@ proven wrong; never change feel constants"by judgment" — the user owns the
 numbers, and any unexplained feel change should be checked against the saved
 tuning before being treated as physics (see the tuning LESSON above).
 
+- Ticket 21 — **the flick playable with a mouse (2026-11-01, from user
+  feedback).** "Flick mode is default but it is really difficult on desktop":
+  press without moving and the knuckle flies away from the pointer, rings for
+  half a second, and orbits small circles "like it is attached with an elastic
+  rope". TWO REAL DEFECTS, neither about feel:
+  - **The gesture target was never set.** `flick.ts` drove the finger at a
+    `nextTarget` that still held the world origin until a `pointermove` came, so
+    every gesture began by chasing `(0,0,0)`: measured 19 cm of departure and
+    4.5 mm of bob from a click that never moved. A guard already existed for it
+    in the tap maths (`nextTarget.lengthSq() > 0 ? …`) — **LESSON: patching each
+    READER of a bad state leaves the state bad for the next reader. Fix the
+    state.**
+  - **The tracking law was an undamped bang-bang controller.** Asking for "be
+    there by the end of this step" is a request `maxAccel` always refuses, and
+    what is left overshoots by roughly the distance it came from (183 mm over a
+    20 cm move) and rings. It now asks for
+    `min(maxSpeed, √(2·0.7·maxAccel·distance), distance/dt)` — the fastest speed
+    it can still brake from — which measures 0.1 mm of overshoot and arrives
+    SOONER, because it no longer wastes a crawl coming back. **LESSON: a cap on
+    acceleration is not a controller; without a braking curve the only stable
+    thing it can do is oscillate.**
+  - Two rules the user asked for and now hold: **the knuckle is a hoverboard**
+    (`restrictTranslations` locks Y to the gesture plane — no Car and no sweep
+    may move it up or down), and **one gesture has one height** (the gesture
+    plane is frozen at touch-down). The known cost of the first: if the aimed
+    Car climbs a kerb mid-Push, the knuckle can miss it.
+  - `check:knuckle` (new) measures tracking on the FLAT control first; the
+    equivalent case in `check:flick` guards the input layer. Both were red
+    before and green after.
+  - **OPEN (user's judgement): `maxSpeed`**, the new cruise cap (default 30 u/s
+    ~ 3 m/s). It is what makes a mouse honest — a wrist flick asks the knuckle
+    to be metres away between two steps — and it is also the answer to "flicks
+    launch the Car too far". Strength now follows how fast the pointer really
+    moves rather than √(2·maxAccel·run-up): roll for commanded 0.3/0.6/1.0 m/s
+    went 44/103/71 cm -> 28/98/45 cm, and a centred flick stopped scattering
+    sideways (-14 mm, 0.8° -> 0 mm, 0.01°). Ticket 21 holds it.
+
 ## Roadmap (what's next)
 
 1. **Feel tuning** (current phase — USER-held, not an agent task) — the

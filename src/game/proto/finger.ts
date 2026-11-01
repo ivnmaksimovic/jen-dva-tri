@@ -37,6 +37,16 @@ const interaction = (membership: number, filter: number): number => (membership 
 const MOVE_EPS = 1e-9;
 
 /**
+ * How much of `maxAccel` the braking curve may spend. Measured, not guessed:
+ * at 1/240 s a body that may only shed speed at `maxAccel` cannot follow a curve
+ * drawn in continuous time — the last step asks for ~40% more deceleration than
+ * it is allowed, which showed up as 5 mm of overshoot and a swing back. 0.7 is
+ * the smallest margin that removes it (`check:knuckle` prints the overshoot), and
+ * it arrives SOONER than 1.0, because it no longer wastes a crawl coming back.
+ */
+const BRAKE_MARGIN = 0.7;
+
+/**
  * Two ways to put a finger in the world. Both exist because `check:finger`
  * measured them against each other:
  *
@@ -79,6 +89,16 @@ export interface FingerParams {
    * doing rather than the engine's.
    */
   maxAccel: number;
+  /**
+   * The fastest the hand can carry it (world units/s; 10 = 1 m/s). A bound on
+   * SPEED where `maxAccel` is a bound on EFFORT — and without it the tracking
+   * law is dangerous on a mouse, where one flick of the wrist asks the knuckle
+   * to cross metres in a frame. ~3 m/s is what a real finger manages, so the
+   * cap is honest rather than protective; what it costs is that a very fast
+   * swipe no longer arrives faster than this. Pull it down if desktop flicks
+   * launch the Car too far — that is the number to pull.
+   */
+  maxSpeed: number;
 }
 
 /**
@@ -97,6 +117,7 @@ export const DEFAULT_FINGER_PARAMS: FingerParams = {
   // single flick rolled the Car over 3 m. These are theirs, not mine.
   massFactor: 0.5,
   maxAccel: 100,
+  maxSpeed: 30, // 3 m/s: about what a real finger flick tops out at
 };
 
 /** The finger's box: local +X along the strike, +Y up, +Z across the knuckle. */
@@ -167,7 +188,8 @@ export class Finger {
       setFingerTarget(aimedCar, true);
     }
     // Servo mode: real mass, no gravity (a hand holds it up), no tumbling (a
-    // knuckle is presented on purpose), no damping (the servo does that).
+    // knuckle is presented on purpose), no damping (the servo does the braking,
+    // see `driveServo`), and Y locked outright — it is a hoverboard.
     const servo = RAPIER.RigidBodyDesc.dynamic()
       .setAdditionalMass(params.massFactor * (aimedCar ? aimedCar.chassis.mass() : 1))
       .setGravityScale(0)
@@ -179,6 +201,14 @@ export class Finger {
         .setCcdEnabled(true)
         .setTranslation(at.x, at.y, at.z),
     );
+    // A hoverboard, stated to the engine rather than corrected every frame: the
+    // knuckle may not translate along Y at all, so no contact can lift it and no
+    // sweep can bob it. Its height was chosen when the gesture began — where the
+    // touch met the gesture plane — and stays there. (Consequence worth knowing:
+    // if the aimed Car climbs a kerb mid-Push, the knuckle stays at the height it
+    // was summoned at and can miss it. Riding a Surface change is not a thing a
+    // held finger does either.)
+    if (model === 'servo') this.body.restrictTranslations(true, false, true, true);
     this.collider = world.createCollider(
       RAPIER.ColliderDesc.cuboid(params.deep, params.tall, params.across)
         // Frictionless on purpose: a fingertip skids off more than it grips,
@@ -327,19 +357,35 @@ export class Finger {
   }
 
   /**
-   * Servo mode: the finger is a REAL body chasing the touch point, with two
+   * Servo mode: the finger is a REAL body chasing the touch point, with three
    * limits that are the whole reason it behaves like a finger.
    *
-   * A velocity servo does the chasing: it wants to be at the touch point by the
-   * end of this step, so it wants that velocity, and asks for exactly the
-   * acceleration that would get it there — then the answer is CAPPED, because a
-   * hand cannot accelerate without limit. Under load (a Car in the way) the cap
-   * is what the finger loses: it cannot maintain its speed through the impact,
-   * so the Car takes the momentum and leaves. That is a strike. A gentle sweep
-   * never hits the cap, so it keeps pressing for as long as the player keeps
-   * going — riding, which the game shows rather than prevents (ticket 18).
+   * The chase is a velocity servo: it asks for the velocity that would put it
+   * at the touch point, and pays for the change in velocity at a bounded
+   * acceleration, because a hand cannot accelerate without limit. Under load
+   * (a Car in the way) the bound is what the finger loses: it cannot maintain
+   * its speed through the impact, so the Car takes the momentum and leaves.
+   * That is a strike. A gentle sweep never hits the bound, so it keeps pressing
+   * for as long as the player keeps going — riding, which the game shows rather
+   * than prevents (ticket 18).
    *
-   * The second limit is the no-passing-through rule, stated softly: once the
+   * The velocity it asks for is NOT "arrive this step" (move/dt). That was the
+   * first version, and it is why the knuckle used to swing past the touch point
+   * and orbit it on an elastic rope: wanting to arrive inside one step asks for
+   * an acceleration no hand can give, the cap refuses it, and what is left is
+   * an undamped bang-bang controller — it always overshoots, by roughly the
+   * distance it came from, and rings for half a second. `check:knuckle` shows
+   * it. So the ask is instead the fastest speed it can still STOP from:
+   *
+   *   speed = min(maxSpeed, √(2·0.7·maxAccel·distance), distance/dt)
+   *
+   * the braking distance of a body that may not exceed `maxAccel`. Arrival is
+   * then guaranteed with nothing left over, at every distance, and the knuckle
+   * sits under the pointer the way a held finger sits under a hand. `maxSpeed`,
+   * the cruise cap, is what keeps the whole law honest on a mouse, where the
+   * touch can ask to be metres away between two steps.
+   *
+   * The third limit is the no-passing-through rule, stated softly: once the
    * finger has sunk to its budget it stops receiving force along the strike.
    * It may still press sideways, which is how a Car is turned rather than
    * launched.
@@ -347,12 +393,26 @@ export class Finger {
   private driveServo(target: THREE.Vector3, dt: number): { requested: number; allowed: number } {
     const pos = this.position;
     const move = new THREE.Vector3().subVectors(target, pos);
+    // Hoverboard: Y is decided by the gesture plane and by nothing else — not
+    // by the touch, not by contact, not by the Car it is leaning on. Asking
+    // only ever happens in the plane (and the body is locked to it besides).
+    move.y = 0;
     const requested = move.length();
     if (requested > MOVE_EPS) this.faceInto(move.clone().divideScalar(requested));
 
+    // Three answers to "how fast may I go toward it": the cruise cap, the
+    // braking distance (budgeted at BRAKE_MARGIN — see it below), and, close
+    // enough to arrive inside this very step, exactly the speed that lands on
+    // it. The last one only wins in the final few millimetres.
+    const speed = Math.min(
+      this.params.maxSpeed,
+      Math.sqrt(2 * BRAKE_MARGIN * this.params.maxAccel * requested),
+      requested / dt,
+    );
+    const desired = requested > MOVE_EPS ? move.clone().multiplyScalar(speed / requested) : new THREE.Vector3();
     const v = this.body.linvel();
     const current = new THREE.Vector3(v.x, v.y, v.z);
-    const accel = move.clone().divideScalar(dt).sub(current).divideScalar(dt);
+    const accel = desired.clone().sub(current).divideScalar(dt);
 
     // No passing through: once it has sunk to its budget, stop adding anything
     // ALONG the strike. It may still press sideways, which is how a Car is

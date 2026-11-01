@@ -505,6 +505,11 @@ export async function createProtoScene(game: Game): Promise<void> {
   // interesting combinations with a stronger hand live.
   flickFolder.add(flickParams, 'maxAccel', 5, 2000, 5).name('hand strength (max accel)').onFinishChange(persist);
   flickFolder.add(flickParams, 'massFactor', 0.02, 20, 0.01).name('finger mass (× Car)').onFinishChange(persist);
+  // The speed cap the tracking law needs (added 2026-11-01, fixing the desktop
+  // knuckle): a mouse can ask the knuckle to be metres away between two frames,
+  // and nothing honest follows that. 30 u/s ~ 3 m/s, about a real flick. THIS IS
+  // THE NUMBER TO PULL DOWN if desktop flicks launch the Car too far.
+  flickFolder.add(flickParams, 'maxSpeed', 2, 60, 1).name('finger speed cap (u/s)').onFinishChange(persist);
   flickFolder.add(flickParams, 'maxPenetration', 0.002, 0.03, 0.001).name('max penetration (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'across', 0.01, 0.15, 0.005).name('knuckle across (m)').onFinishChange(persist);
   flickFolder.add(flickParams, 'deep', 0.01, 0.15, 0.005).name('knuckle along (m)').onFinishChange(persist);

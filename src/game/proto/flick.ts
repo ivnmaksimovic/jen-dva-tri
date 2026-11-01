@@ -114,15 +114,14 @@ export function setupFlick(
   }
 
   /**
-   * Where the touch meets the plane the Car's chassis lives on. The finger is
-   * presented at that height (a knuckle meets the bodywork, not the ground), so
-   * the gesture plane has to be the same one the body sits in.
+   * Where the touch meets the gesture plane — the plane the Car's chassis sat
+   * in when the touch landed (a knuckle meets the bodywork, not the ground).
+   * One height for the whole gesture: nothing that happens afterwards moves it.
    */
   function fingerPoint(e: PointerEvent): THREE.Vector3 | null {
     toNDC(e);
     raycaster.setFromCamera(ndc, game.camera);
-    const car = getCar();
-    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -car.position.y);
+    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -gestureY);
     const out = new THREE.Vector3();
     return raycaster.ray.intersectPlane(plane, out) ? out : null;
   }
@@ -161,6 +160,9 @@ export function setupFlick(
       releaseGesture?.();
       return;
     }
+    // The gesture plane is fixed BEFORE the touch is read against it: one
+    // height for one gesture, and the height it is read at must be that one.
+    gestureY = getCar().position.y;
     const at = fingerPoint(e);
     if (!at) {
       releaseGesture?.();
@@ -172,6 +174,9 @@ export function setupFlick(
       releaseGesture?.();
       return;
     }
+    // A gesture that has not moved yet wants to be exactly where it began.
+    // Without this the finger was driven at a target nobody had set (see above).
+    nextTarget.copy(at);
     if (!canPush()) {
       onRefused(`Turn over — ${car.params.name} is out of Pushes (Next Turn)`);
       releaseGesture?.();
@@ -214,16 +219,29 @@ export function setupFlick(
     if (!finger || e.pointerId !== pointerId) return;
     const at = fingerPoint(e);
     if (at) {
-      travelled += at.distanceTo(nextTarget.lengthSq() > 0 ? nextTarget : at.clone());
-      nextTarget = at;
+      travelled += at.distanceTo(nextTarget);
+      nextTarget.copy(at); // on the gesture plane already — `fingerPoint` puts it there
     }
   });
 
   el.addEventListener('pointerup', endGesture);
   el.addEventListener('pointercancel', endGesture);
 
-  /** Where the touch wants the finger this frame; drive owns the permission. */
+  /**
+   * Where the touch wants the finger this frame; drive owns the permission.
+   * IT IS SET AT TOUCH-DOWN, to the same point the finger is created at — a
+   * gesture that has not moved yet wants to be where it began, not somewhere
+   * else. Left unset it asked for the world origin, and the knuckle flew off
+   * the instant the mouse went down and came back only when a move arrived:
+   * the desktop bug `check:knuckle` now guards.
+   */
   let nextTarget = new THREE.Vector3();
+  /**
+   * The gesture plane: one height, chosen when the touch landed. The touch is
+   * read against it for the whole gesture, so it is not dragged up and down by
+   * the Car's own ride height as the Car gets shoved.
+   */
+  let gestureY = 0;
 
   function endGesture(): void {
     reportContact();
