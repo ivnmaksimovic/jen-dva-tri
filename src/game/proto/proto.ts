@@ -16,8 +16,16 @@ import { CAR_PRESETS, STARTING_GRID, Car, carHalfWidth, type CarParams } from '.
 import { setupSlingshot, type PushParams } from './slingshot.js';
 import { setupFlick, DEFAULT_FLICK_PARAMS, MARKER_LINGER, type FlickParams } from './flick.js';
 import { CameraRig, DEFAULT_CAMERA_PARAMS, type CameraParams } from './camera.js';
-import { setupLook, DEFAULT_LOOK, type LookParams } from './look.js';
-import { setChalkResolution, setChalkWidth } from './track.js';
+import {
+  buildLightRig,
+  ContactShadows,
+  setupLook,
+  SUN_DIR,
+  DEFAULT_LOOK,
+  type LookParams,
+} from './look.js';
+import { chalkMaterial, ribbonGeometry } from './chalk.js';
+import { RING_BED } from './palette.js';
 import { Rules, START_S } from './rules.js';
 import { createHud } from './hud.js';
 
@@ -43,49 +51,48 @@ export async function createProtoScene(game: Game): Promise<void> {
 
   // --- Scene: outdoor light, sky, shadows ---
   const scene = game.scene;
-  scene.background = new THREE.Color('#b9c6d4');
-  scene.fog = new THREE.Fog('#b9c6d4', 40, 90);
+  // The haze is owned by `setupLook`, which also owns the sky: the fog
+  // colour and the sky's horizon colour are the same colour, so the
+  // horizon has no seam.
 
   // Ticket 20: tone mapping, an environment for metal and glass to reflect, and
   // haze anchored to how far the camera ACTUALLY is (it used to be absolute, so
   // zooming out put the whole world beyond `far` and washed it to sky colour).
   const lookParams: LookParams = { ...DEFAULT_LOOK };
   const look = setupLook(game, lookParams);
-  /** Chalk is a world-unit band now: the material must know the drawing size. */
-  function syncChalk(): void {
-    const size = new THREE.Vector2();
-    game.renderer.getSize(size);
-    setChalkResolution(size.x, size.y);
-  }
-  syncChalk();
-  setChalkWidth(lookParams.chalkWidth);
-  window.addEventListener('resize', syncChalk);
   function applyLook(): void {
     look.refresh();
     persist();
   }
 
-  const hemi = new THREE.HemisphereLight('#dfe8f2', '#6b6f66', 1.1);
-  scene.add(hemi);
-  const sun = new THREE.DirectionalLight('#fff4e0', 2.2);
-  sun.position.set(14, 26, 6);
-  sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
-  const sc = sun.shadow.camera as THREE.OrthographicCamera;
-  sc.left = -20;
-  sc.right = 26;
-  sc.top = 24;
-  sc.bottom = -8;
-  sc.far = 60;
-  scene.add(sun);
+  // One sun, one fill, one sky bounce. The shadow frustum follows whatever
+  // the player is looking at, because a shadow map that covers the whole test
+  // ground cannot resolve a 4.5 cm car.
+  const sun = buildLightRig(scene, lookParams);
+  sun.intensity = lookParams.sun;
 
   game.renderer.shadowMap.enabled = true;
   game.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+
+  /**
+   * The soft smudge under each Car.
+   *
+   * A shadow map cannot resolve a 1:64 car across thirty metres of ground,
+   * so this is what actually puts the Car ON the ground. It is skewed away
+   * from the sun so it agrees with the real shadow instead of sitting under
+   * the Car like a sticker.
+   */
+  const contact = new ContactShadows(scene, STARTING_GRID.length);
+  /** The compass direction the light comes FROM. */
+  const sunAzimuth = Math.atan2(SUN_DIR.z, SUN_DIR.x);
 
   // Surfaces: what each wheel stands on (ADR-0002 — grip is a property of the
   // contact, so this is World state, never Car state).
   const field = new SurfaceField();
   const track = new Track(scene);
+  // The chalk is drawn at the width the direction asks for. The Track owns
+  // the geometry, so changing the width repaints the marks.
+  track.setChalkWidth(lookParams.chalkWidth / 2);
   // Stones only go where a car can actually drive over them: on the Track. A
   // whole square's worth costs milliseconds a frame and nobody ever rolls on
   // the other 90% of it (see ticket 17 for the measured numbers).
@@ -301,17 +308,16 @@ export async function createProtoScene(game: Game): Promise<void> {
         canvas.width = size;
         canvas.height = size;
         const ctx = canvas.getContext('2d')!;
+        // A chalk bullseye: a ring of chalk dust with a dark core, so the
+        // strike point reads as a MARK ON THE CAR rather than a UI dot.
         ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(12,12,12,0.92)';
-        ctx.fill();
+        ctx.arc(size / 2, size / 2, size / 2 - 3, 0, Math.PI * 2);
+        ctx.strokeStyle = 'rgba(244,241,230,0.95)';
+        ctx.lineWidth = 9;
+        ctx.stroke();
         ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size / 2 - 12, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffffff';
-        ctx.fill();
-        ctx.beginPath();
-        ctx.arc(size / 2, size / 2, size * 0.13, 0, Math.PI * 2);
-        ctx.fillStyle = '#141414';
+        ctx.arc(size / 2, size / 2, size * 0.17, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(22,24,26,0.92)';
         ctx.fill();
         const tex = new THREE.CanvasTexture(canvas);
         tex.colorSpace = THREE.SRGBColorSpace;
@@ -319,7 +325,7 @@ export async function createProtoScene(game: Game): Promise<void> {
       })(),
     }),
   );
-  strikeMark.scale.setScalar(0.13);
+  strikeMark.scale.setScalar(0.16);
   strikeMark.renderOrder = 20;
   strikeMark.visible = false;
   scene.add(strikeMark);
@@ -542,7 +548,7 @@ export async function createProtoScene(game: Game): Promise<void> {
   lookFolder
     .add(lookParams, 'chalkWidth', 0.01, 0.3, 0.005)
     .name('chalk width (units)')
-    .onChange((v: number) => setChalkWidth(v));
+    .onChange((v: number) => track.setChalkWidth(v / 2));
 
   const camFolder = gui.addFolder('Camera');
   // Distance and angle are PINCH now, not sliders: the user asked for exactly
@@ -616,26 +622,64 @@ export async function createProtoScene(game: Game): Promise<void> {
   // Which Car the next Push belongs to: colours already tell the Cars apart,
   // the ring says which one is AIMED AT before you press (unambiguous even
   // when two Cars sit touching).
-  const ringGeom = new THREE.BufferGeometry().setFromPoints(
-    Array.from({ length: 49 }, (_, k) => {
-      const a = (k / 48) * Math.PI * 2;
-      return new THREE.Vector3(Math.cos(a), 0, Math.sin(a));
+  //
+  // It used to be a `LineBasicMaterial` circle — one pixel wide, floating
+  // above the ground, the only white hairline left in a world made of chalk.
+  // Now it is a chalk CIRCLE in the Car's own colour, drawn on the ground
+  // with the same hand as the Track: a coloured chalk ring around the toy
+  // you are about to push.
+  //
+  // It sits on a DARK BED, because a coloured chalk ring on sunlit concrete
+  // is about 1.3:1 — unreadable. The bed is the dirty rim every real chalk
+  // mark has, and it guarantees the ring reads on concrete AND on asphalt.
+  // The ring's path is out-of-round in a way that CLOSES: a periodic
+  // radial drift, not a wobble along an open path. (An open-path wobble
+  // leaves a seam at the start and turns the ring into a polygon.)
+  const ringPath = Array.from({ length: 97 }, (_, k) => {
+    const a = (k / 96) * Math.PI * 2;
+    const r =
+      1 +
+      0.05 * Math.sin(a * 2 + 0.7) * 0.5 +
+      0.05 * Math.sin(a * 3 + 2.4) * 0.3 +
+      0.05 * Math.sin(a * 5 + 4.1) * 0.2;
+    return new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r);
+  });
+  const ringBed = new THREE.Mesh(
+    ribbonGeometry(ringPath, { halfWidth: 0.062, closed: true, pressure: 0.32, seed: 71 }),
+    new THREE.MeshBasicMaterial({
+      color: RING_BED,
+      transparent: true,
+      opacity: 0.5,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -3,
+      polygonOffsetUnits: -6,
     }),
   );
-  const ring = new THREE.Line(
-    ringGeom,
-    new THREE.LineBasicMaterial({
-      color: 0xffffff,
-      transparent: true,
-      opacity: 0.85,
-      depthTest: false,
-      depthWrite: false,
-    }),
+  ringBed.renderOrder = 4;
+  scene.add(ringBed);
+
+  const ringMat = chalkMaterial().clone();
+  ringMat.emissiveIntensity = 0.6;
+  const ring = new THREE.Mesh(
+    ribbonGeometry(ringPath, { halfWidth: 0.042, closed: true, pressure: 0.32, seed: 72 }),
+    ringMat,
   );
   ring.renderOrder = 5; // under the strike overlay (arrow 10, marker 20)
   scene.add(ring);
 
   // --- Main loop: physics, sync, rules, camera ---
+  /**
+   * The camera's follow MODE, mirrored into the HUD.
+   *
+   * Following ends the moment the player takes the camera (ticket 19), and
+   * it can end from a gesture nobody is looking at — so the HUD is told
+   * rather than asked. Without this the player cannot tell whether the
+   * camera is attached, and cannot find the way back.
+   */
+  let cameraFollowing = camParams.following;
+  hud.setCameraFollowing(cameraFollowing);
+
   game.onUpdate((dt) => {
     for (let i = 0; i < 4; i++) {
       // Input that drives a body acts per step, before that step is taken.
@@ -667,13 +711,52 @@ export async function createProtoScene(game: Game): Promise<void> {
         .wheelSurfaces()
         .map((s) => (s ? { label: s.label, color: s.color } : { label: 'air', color: 0xffffff })),
     );
-    ring.position.set(car.position.x, terrainY(car.position.x, car.position.z) + 0.02, car.position.z);
-    ring.scale.setScalar(carHalfWidth(car.params) + 0.07);
+    ring.position.set(
+      car.position.x,
+      terrainY(car.position.x, car.position.z) + 0.014,
+      car.position.z,
+    );
+    ring.scale.setScalar(carHalfWidth(car.params) + 0.09);
+    ringBed.position.copy(ring.position);
+    ringBed.position.y -= 0.002;
+    ringBed.scale.copy(ring.scale);
+    // The ring is the Car's colour, so the player can tell WHICH Car is
+    // aimed at without reading a label.
+    ringMat.color.setHex(car.params.color);
+    ringMat.emissive.setHex(car.params.color);
+    // A slow breath, never a flash: the eye finds it, and nobody's photosensitive.
+    const breathe = 1 + Math.sin(performance.now() / 1200) * 0.045;
+    ring.scale.multiplyScalar(breathe);
+    ringBed.scale.copy(ring.scale);
+
+    // The contact smudge under each Car, and the shadow frustum over what
+    // the player is actually looking at.
+    for (let i = 0; i < cars.length; i++) {
+      const c = cars[i];
+      contact.set(
+        i,
+        c.position.x,
+        terrainY(c.position.x, c.position.z),
+        c.position.z,
+        carHalfWidth(c.params) + 0.06,
+        lookParams.contact,
+        sunAzimuth,
+      );
+    }
+    contact.commit();
 
     cameraRig.update(dt, car.position);
+    if (camParams.following !== cameraFollowing) {
+      cameraFollowing = camParams.following;
+      hud.setCameraFollowing(cameraFollowing);
+    }
     // Haze follows whatever distance the camera chose, so depth reads the same
     // from a bird's eye view and from 300 units up.
     look.update(game.camera.position.distanceTo(car.position));
+    // Keep the shadow frustum over the action, so a 1:64 car still casts a
+    // shadow you can read.
+    look.focus(car.position.x, car.position.z);
+    look.frameShadow(game.camera.position.distanceTo(car.position));
   });
 
   // Debug handle for the phone's remote console / tests (throwaway code).
@@ -695,7 +778,22 @@ export async function createProtoScene(game: Game): Promise<void> {
     track,
     rules,
     camera: game.camera,
+    renderer: game.renderer,
+    scene: game.scene,
     setTestField,
     setCarParams,
+    /**
+     * Framing, for reproducible screenshots and for the phone's remote
+     * console. Same camera the player has: these are the same numbers the
+     * gestures write, so a shot taken this way is a shot the player can
+     * actually reach.
+     */
+    setCam(patch: Partial<CameraParams>): void {
+      Object.assign(camParams, patch);
+      cameraRig.apply();
+    },
+    lookAt(x: number, y: number, z: number): void {
+      cameraRig.focusAt(new THREE.Vector3(x, y, z));
+    },
   };
 }

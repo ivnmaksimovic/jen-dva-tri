@@ -15,7 +15,7 @@
  */
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
-import { GRAVITY, buildTerrainPhysics, initPhysics } from '../world.js';
+import { GRAVITY, initPhysics } from '../world.js';
 import { SurfaceField, uniformAssignment } from '../surfaces.js';
 import { Car, STARTING_GRID } from '../car.js';
 import { Track } from '../track.js';
@@ -56,7 +56,7 @@ function drawables(root: THREE.Object3D): { objects: number; instanced: number }
     if (any.isInstancedMesh) {
       instanced++;
       objects++;
-    } else if (any.isMesh || any.isLine || any.isPoints) {
+    } else if (any.isMesh || any.isLine) {
       objects++;
     }
   });

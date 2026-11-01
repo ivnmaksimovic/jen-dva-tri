@@ -5,10 +5,13 @@ import {
   STONE_RADIUS,
   STONE_TOP,
   SURFACES,
+  SURFACE_TILE_UNITS,
   SURVEY_GROUP,
   hash01,
+  stoneMaterial,
   surfaceMaterial,
   type Square,
+  type SurfaceKey,
   type SurfaceField,
 } from './surfaces.js';
 
@@ -410,6 +413,48 @@ export function buildTerrainPhysics(
 }
 
 /**
+ * Scale a box's UVs to WORLD units, so one texture tile covers `tile` units
+ * no matter how big the box is and no matter where it sits.
+ *
+ * Without this, the 80-unit apron and the 28-unit sample squares each had
+ * their texture stretched over their own face, so the same concrete looked
+ * like two different materials at the seam and the score joints did not
+ * continue across it. The UVs are derived from each vertex's world position,
+ * so the ground is one continuous sheet of pavement.
+ */
+export function worldUV(
+  geo: THREE.BufferGeometry,
+  size: [number, number, number],
+  center: [number, number, number],
+  tile: number,
+): void {
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  if (!uv || !pos) return;
+  // BoxGeometry face order: +X, -X, +Y, -Y, +Z, -Z, four vertices each.
+  for (let f = 0; f < 6; f++) {
+    for (let i = 0; i < 4; i++) {
+      const idx = f * 4 + i;
+      const wx = pos.getX(idx) + center[0];
+      const wy = pos.getY(idx) + center[1];
+      const wz = pos.getZ(idx) + center[2];
+      let u = wx;
+      let v = wz;
+      if (f === 0 || f === 1) {
+        u = wz;
+        v = wy;
+      } else if (f === 4 || f === 5) {
+        u = wx;
+        v = wy;
+      }
+      uv.setXY(idx, u / tile, v / tile);
+    }
+  }
+  uv.needsUpdate = true;
+  void size;
+}
+
+/**
  * Visual meshes. Two layers of them, because there are two things to see:
  * the solid ground (what you roll on) and, painted on top of it at 0.1 mm,
  * each square's own material (what you are standing on). Both are keyed by
@@ -422,10 +467,9 @@ export function buildTerrainMeshes(
 ): Map<Square, THREE.Mesh[]> {
   const bySquare = new Map<Square, THREE.Mesh[]>();
   const addMesh = (p: TerrainPiece, square: Square): void => {
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(...p.size),
-      surfaceMaterial(field.squares[square]),
-    );
+    const geo = new THREE.BoxGeometry(...p.size);
+    worldUV(geo, p.size, p.center, SURFACE_TILE_UNITS[field.squares[square]]);
+    const mesh = new THREE.Mesh(geo, surfaceMaterial(field.squares[square]));
     mesh.position.set(...p.center);
     mesh.quaternion.copy(p.rotation);
     mesh.receiveShadow = true;
@@ -440,11 +484,16 @@ export function buildTerrainMeshes(
   // feel). `userData.square` marks these so `refreshTerrain` can repaint them.
   for (const q of SQUARES) {
     const { x, z } = spanOf(q);
-    const mesh = new THREE.Mesh(
-      new THREE.BoxGeometry(x[1] - x[0], 0.002, z[1] - z[0]),
-      surfaceMaterial(field.squares[q]),
-    );
-    mesh.position.set((x[0] + x[1]) / 2, surfaceHeight(q) + 0.001, (z[0] + z[1]) / 2);
+    const size: [number, number, number] = [x[1] - x[0], 0.002, z[1] - z[0]];
+    const center: [number, number, number] = [
+      (x[0] + x[1]) / 2,
+      surfaceHeight(q) + 0.001,
+      (z[0] + z[1]) / 2,
+    ];
+    const geo = new THREE.BoxGeometry(...size);
+    worldUV(geo, size, center, SURFACE_TILE_UNITS[field.squares[q]]);
+    const mesh = new THREE.Mesh(geo, surfaceMaterial(field.squares[q]));
+    mesh.position.set(...center);
     mesh.receiveShadow = true;
     mesh.userData.square = q;
     scene.add(mesh);
@@ -477,7 +526,7 @@ function addStoneMeshes(
     if (list.length === 0) continue;
     const mesh = new THREE.InstancedMesh(
       new THREE.SphereGeometry(1, 8, 6),
-      surfaceMaterial(field.squares[square]),
+      stoneMaterial(field.squares[square] as SurfaceKey),
       list.length,
     );
     const m = new THREE.Matrix4();

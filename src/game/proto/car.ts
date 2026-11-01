@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { GRAVITY } from './world.js';
+import { CAR, PAINT } from './palette.js';
 import type { SurfaceDef, SurfaceField } from './surfaces.js';
 
 /**
@@ -43,7 +45,7 @@ export interface CarParams {
 export const CAR_PRESETS: CarParams[] = [
   {
     name: 'Plastic (small wheels, nimble)',
-    color: 0xd94f4f,
+    color: PAINT.red,
     mass: 0.8,
     wheelRadius: 0.06,
     wheelHalfWidth: 0.025,
@@ -53,7 +55,7 @@ export const CAR_PRESETS: CarParams[] = [
   },
   {
     name: 'Balanced (medium)',
-    color: 0x4f7fd9,
+    color: PAINT.blue,
     mass: 1.3,
     wheelRadius: 0.075,
     wheelHalfWidth: 0.03,
@@ -130,12 +132,12 @@ const CAR_FILTER = ENV_GROUP | CAR_GROUP;
  * ticket 16 split grip between Surface and tire, per ADR-0002).
  */
 export const STARTING_GRID: CarParams[] = [
-  { ...CAR_PRESETS[0], name: 'Red', color: 0xd94f4f },
-  { ...CAR_PRESETS[0], name: 'Blue', color: 0x3f6fe0 },
+  { ...CAR_PRESETS[0], name: 'Red', color: PAINT.red },
+  { ...CAR_PRESETS[0], name: 'Blue', color: PAINT.blue },
   {
     ...CAR_PRESETS[2],
     name: 'Green (heavy)',
-    color: 0x3fbf6a,
+    color: PAINT.green,
     tireGrip: 0.8,
     tireRoll: 2.0,
     angularDamping: 0.45,
@@ -157,9 +159,13 @@ export class Car {
   private readonly world: RAPIER.World;
   /** Where grip comes from: the Surface under each wheel (ADR-0002). */
   private readonly field: SurfaceField;
-  private readonly chassisMesh: THREE.Mesh;
-  private readonly wheelMeshes: THREE.Mesh[] = [];
   private readonly wheelLocal: THREE.Vector3[] = [];
+  /** Every visual mesh this Car owns, so they can be disposed together. */
+  private readonly meshes: THREE.Mesh[] = [];
+  /** All four wheels as ONE instanced mesh: one draw call per Car. */
+  private readonly wheels: THREE.InstancedMesh;
+  /** How far the wheels have turned, radians. */
+  private spin = 0;
   /** What each wheel was standing on last frame (null = nothing there) — HUD. */
   private wheelSamples: (SurfaceDef | null)[] = [];
 
@@ -209,27 +215,87 @@ export class Car {
           this.chassis,
         );
         this.wheelLocal.push(local);
-
-        const geom = new THREE.CylinderGeometry(r, r, params.wheelHalfWidth * 2, 14);
-        geom.rotateX(Math.PI / 2); // axle along local Z (left-right) — Car drives +X
-        const mesh = new THREE.Mesh(
-          geom,
-          new THREE.MeshStandardMaterial({ color: 0x2c2c30, roughness: 0.9 }),
-        );
-        mesh.position.copy(local);
-        mesh.castShadow = true;
-        this.wheelMeshes.push(mesh);
-        this.group.add(mesh);
       }
     }
 
-    this.chassisMesh = new THREE.Mesh(
-      new THREE.BoxGeometry(CHASSIS_HALF.x * 2, CHASSIS_HALF.y * 2, CHASSIS_HALF.z * 2),
-      new THREE.MeshStandardMaterial({ color: params.color, roughness: 0.55, metalness: 0.35 }),
-    );
-    this.chassisMesh.castShadow = true;
-    this.group.add(this.chassisMesh);
+    this.buildBody();
+    this.wheels = this.buildWheels();
+    this.group.add(this.wheels);
     scene.add(this.group);
+  }
+
+  /**
+   * The Car as a toy.
+   *
+   * It used to be ONE box and four black cylinders. At 1:64 on a phone that
+   * reads as a coloured rectangle — the silhouette carries all the meaning
+   * and a rectangle has none. This builds a shape with a nose, a cabin, a
+   * glasshouse, a racing stripe, bumpers and lamps, because from above the
+   * thing that says "toy car" is the SILHOUETTE and the two-tone split.
+   *
+   * Every part is merged into one mesh PER MATERIAL, so the whole Car is
+   * four draw calls instead of one per part.
+   */
+  private buildBody(): void {
+    const paint = new THREE.Color(this.params.color);
+    // A lighter tint of the paint for the racing stripe: two-tone is what
+    // makes a small object readable at a glance. It stays a TINT — at 62%
+    // white it read as a sticker stuck on the roof.
+    const stripe = paint.clone().lerp(new THREE.Color(0xffffff), 0.38);
+
+    const body = mergeGeometries([
+      box(0.45, 0.075, 0.195, 0, -0.008, 0, this.params.color),
+      // The roof panel, sitting ON the glasshouse so a band of glass shows
+      // all the way round it: that band is what makes the shape read as a
+      // CAR from above instead of as a slab with a white label on it. The
+      // roof is deliberately LARGE — the glass should be a rim, not a field.
+      box(0.172, 0.016, 0.152, -0.015, 0.074, 0, this.params.color),
+    ]);
+    const trim = mergeGeometries([
+      box(0.115, 0.005, 0.024, 0.158, 0.031, 0, stripe.getHex()),
+      box(0.17, 0.005, 0.022, -0.015, 0.083, 0, stripe.getHex()),
+      box(0.024, 0.03, 0.188, 0.232, -0.018, 0, CAR.underside),
+      box(0.024, 0.03, 0.188, -0.232, -0.018, 0, CAR.underside),
+      box(0.42, 0.014, 0.168, 0, -0.044, 0, CAR.underside),
+    ]);
+    // The glasshouse: a cabin-sized band of tinted glass between the body
+    // and the roof. Its top face is the windscreen and the rear window.
+    const glass = box(0.195, 0.052, 0.166, -0.015, 0.04, 0, CAR.glass);
+    const lamps = mergeGeometries([
+      box(0.014, 0.018, 0.034, 0.223, 0.004, 0.06, CAR.headlight),
+      box(0.014, 0.018, 0.034, 0.223, 0.004, -0.06, CAR.headlight),
+      box(0.012, 0.016, 0.032, -0.223, 0.004, 0.06, CAR.taillight),
+      box(0.012, 0.016, 0.032, -0.223, 0.004, -0.06, CAR.taillight),
+    ]);
+
+    this.addMesh(body, paintMaterial(this.params.color));
+    this.addMesh(trim, trimMaterial());
+    this.addMesh(glass, glassMaterial());
+    this.addMesh(lamps, lampMaterial());
+  }
+
+  /** The four wheels as one instanced mesh. */
+  private buildWheels(): THREE.InstancedMesh {
+    const r = this.params.wheelRadius;
+    const w = this.params.wheelHalfWidth * 2;
+    const tire = new THREE.CylinderGeometry(r, r, w, 14);
+    tire.rotateX(Math.PI / 2); // axle along local Z (left-right) — Car drives +X
+    const hub = new THREE.CylinderGeometry(r * 0.46, r * 0.46, w + 0.005, 12);
+    hub.rotateX(Math.PI / 2);
+    const geo = mergeGeometries([tint(tire, CAR.rubber), tint(hub, CAR.hub)])!;
+    const mesh = new THREE.InstancedMesh(geo, wheelMaterial(), this.wheelLocal.length);
+    mesh.castShadow = true;
+    mesh.frustumCulled = false;
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    return mesh;
+  }
+
+  private addMesh(geometry: THREE.BufferGeometry, material: THREE.Material): void {
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.meshes.push(mesh);
+    this.group.add(mesh);
   }
 
   get position(): THREE.Vector3 {
@@ -420,8 +486,17 @@ export class Car {
 
     const forward = new THREE.Vector3(1, 0, 0).applyQuaternion(this.group.quaternion);
     const vf = v.x * forward.x + v.y * forward.y + v.z * forward.z;
-    const spin = (vf / this.params.wheelRadius) * dt;
-    for (const mesh of this.wheelMeshes) mesh.rotation.z -= spin;
+    this.spin -= (vf / this.params.wheelRadius) * dt;
+    // The four wheels are one instanced mesh, so their positions and their
+    // shared rotation are written out as four matrices.
+    const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), this.spin);
+    const m = new THREE.Matrix4();
+    const one = new THREE.Vector3(1, 1, 1);
+    for (let i = 0; i < this.wheelLocal.length; i++) {
+      m.compose(this.wheelLocal[i], q, one);
+      this.wheels.setMatrixAt(i, m);
+    }
+    this.wheels.instanceMatrix.needsUpdate = true;
   }
 
   /**
@@ -483,5 +558,120 @@ export class Car {
   dispose(): void {
     this.world.removeRigidBody(this.chassis);
     this.group.parent?.remove(this.group);
+    for (const mesh of this.meshes) mesh.geometry.dispose();
+    this.wheels.geometry.dispose();
   }
+}
+
+/* --------------------------------------------------------------- helpers -- */
+
+/** A box, placed and tinted, ready to be merged. */
+function box(
+  w: number,
+  h: number,
+  d: number,
+  x: number,
+  y: number,
+  z: number,
+  hex: number,
+): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  geo.translate(x, y, z);
+  return tint(geo, hex);
+}
+
+/** Give a geometry a flat vertex colour, so several parts can share a material. */
+function tint(geo: THREE.BufferGeometry, hex: number): THREE.BufferGeometry {
+  const c = new THREE.Color(hex);
+  const n = geo.attributes.position.count;
+  const arr = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    arr[i * 3] = c.r;
+    arr[i * 3 + 1] = c.g;
+    arr[i * 3 + 2] = c.b;
+  }
+  geo.setAttribute('color', new THREE.BufferAttribute(arr, 3));
+  return geo;
+}
+
+/**
+ * Toy paint: a base coat under a clear coat. The clear coat is what makes a
+ * die-cast model look like a die-cast model rather than a painted box — it
+ * gives a second, sharper highlight over the body colour.
+ */
+const paintMaterials = new Map<number, THREE.MeshPhysicalMaterial>();
+
+function paintMaterial(hex: number): THREE.MeshPhysicalMaterial {
+  const cached = paintMaterials.get(hex);
+  if (cached) return cached;
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: hex,
+    roughness: 0.42,
+    metalness: 0.12,
+    clearcoat: 0.85,
+    clearcoatRoughness: 0.14,
+    vertexColors: false,
+  });
+  paintMaterials.set(hex, mat);
+  return mat;
+}
+
+/** Stripes, bumpers and the underside: matte, and coloured per vertex. */
+let trimMat: THREE.MeshStandardMaterial | null = null;
+
+function trimMaterial(): THREE.MeshStandardMaterial {
+  if (!trimMat) {
+    trimMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.55,
+      metalness: 0.1,
+    });
+  }
+  return trimMat;
+}
+
+/** Tinted glass: dark, smooth, and reflective enough to catch the sky. */
+let glassMat: THREE.MeshPhysicalMaterial | null = null;
+
+function glassMaterial(): THREE.MeshPhysicalMaterial {
+  if (!glassMat) {
+    glassMat = new THREE.MeshPhysicalMaterial({
+      color: CAR.glass,
+      roughness: 0.07,
+      metalness: 0.4,
+      clearcoat: 1,
+      clearcoatRoughness: 0.03,
+    });
+  }
+  return glassMat;
+}
+
+/** Headlights and tail lights: one material, coloured per vertex. */
+let lampMat: THREE.MeshStandardMaterial | null = null;
+
+function lampMaterial(): THREE.MeshStandardMaterial {
+  if (!lampMat) {
+    lampMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.22,
+      metalness: 0.1,
+      emissive: new THREE.Color(0x2a2418),
+      emissiveIntensity: 0.5,
+    });
+  }
+  return lampMat;
+}
+
+/** Rubber and hubs: one material, coloured per vertex. */
+let wheelMat: THREE.MeshStandardMaterial | null = null;
+
+function wheelMaterial(): THREE.MeshStandardMaterial {
+  if (!wheelMat) {
+    wheelMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.72,
+      metalness: 0.25,
+    });
+  }
+  return wheelMat;
 }

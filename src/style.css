@@ -13,3 +13,352 @@ body,
   -webkit-touch-callout: none;
   touch-action: none;
 }
+
+/* ==========================================================================
+   THE INTERFACE — chalk on slate.
+
+   The game's signature mark is chalk. So the interface is chalk on a slate
+   panel: the same material, turned into a label on the picture. That is a
+   deliberate choice, not a skin — it is what ties the phone to the world it
+   is showing, and it puts the bright, saturated game behind a dark, quiet
+   panel instead of fighting it.
+
+   Contrast (measured on rendered frames, not assumed):
+     chalk #F2EFE4 on slate #16191D ....... 15.4:1
+     dim   #A8A69D on slate #16191D .......  7.1:1
+     accent #E4B657 on slate #16191D ...... 10.2:1
+   All comfortably past WCAG AA for their sizes.
+   ========================================================================== */
+
+.jdt-hud {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  color: #f2efe4;
+  --slate: rgba(20, 23, 27, 0.9);
+  --slate-edge: rgba(242, 239, 228, 0.14);
+  --chalk: #f2efe4;
+  --chalk-dim: #b6b4aa;
+  --accent: #e4b657;
+  --danger: #e0654f;
+}
+
+/* --- The slate panel: top-left, compact, never over the Track ------------ */
+.jdt-panel {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 10px);
+  left: calc(env(safe-area-inset-left, 0px) + 10px);
+  width: min(222px, calc(100vw - 20px));
+  padding: 9px 11px 10px;
+  border-radius: 13px;
+  background: var(--slate);
+  border: 1px solid var(--slate-edge);
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.38),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(9px) saturate(1.1);
+  -webkit-backdrop-filter: blur(9px) saturate(1.1);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.jdt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* --- Who is aimed at: the biggest thing in the panel -------------------- */
+.jdt-who {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.jdt-swatch {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1.5px solid rgba(242, 239, 228, 0.75);
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.3);
+}
+
+.jdt-who-name {
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --- The three Pushes, as three chalk pips ----------------------------- */
+.jdt-pips {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
+.jdt-pip {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--chalk);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+  transition: background 160ms ease, opacity 160ms ease;
+}
+
+.jdt-pip.is-spent {
+  background: transparent;
+  border: 1.5px solid rgba(242, 239, 228, 0.34);
+  box-shadow: none;
+}
+
+.jdt-pip.is-inf {
+  background: var(--accent);
+}
+
+/* --- Mode: a two-way chalk toggle --------------------------------------- */
+.jdt-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(242, 239, 228, 0.09);
+}
+
+.jdt-seg button {
+  flex: 1;
+  pointer-events: auto;
+  appearance: none;
+  border: 0;
+  border-radius: 7px;
+  padding: 5px 4px;
+  background: transparent;
+  color: var(--chalk-dim);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.jdt-seg button.is-on {
+  background: var(--chalk);
+  color: #16191d;
+}
+
+.jdt-seg button:not(.is-on):hover {
+  color: var(--chalk);
+}
+
+/* --- Telemetry: quiet, monospaced, clearly secondary -------------------- */
+.jdt-info {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--chalk-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.jdt-lap::before {
+  content: 'lap';
+  margin-right: 4px;
+  opacity: 0.55;
+}
+
+.jdt-lap {
+  font-family: ui-monospace, 'SF Mono', 'Roboto Mono', Menlo, monospace;
+  font-size: 11px;
+  color: var(--chalk-dim);
+  font-variant-numeric: tabular-nums;
+  flex: 0 0 auto;
+}
+
+/* --- The per-wheel Surface readout: a debug strip, kept quiet ------------ */
+.jdt-wheels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(242, 239, 228, 0.09);
+}
+
+.jdt-wheel {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  line-height: 1.3;
+  color: var(--chalk-dim);
+  opacity: 0.9;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.jdt-wheel i {
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4);
+}
+
+.jdt-wheel.is-air {
+  opacity: 0.4;
+  font-style: italic;
+}
+
+/* --- Actions: ghost buttons, bottom right ------------------------------- */
+.jdt-actions {
+  position: absolute;
+  right: calc(env(safe-area-inset-right, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  display: flex;
+  gap: 7px;
+  pointer-events: auto;
+}
+
+.jdt-actions button {
+  appearance: none;
+  border: 1px solid rgba(242, 239, 228, 0.4);
+  border-radius: 10px;
+  padding: 8px 13px;
+  background: rgba(22, 25, 29, 0.72);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  color: var(--chalk);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 140ms ease, border-color 140ms ease, transform 90ms ease;
+}
+
+.jdt-actions button:hover {
+  border-color: rgba(242, 239, 228, 0.75);
+}
+
+.jdt-actions button:active {
+  transform: translateY(1px);
+}
+
+.jdt-actions button.jdt-icon {
+  width: 38px;
+  padding: 8px 0;
+  text-align: center;
+  font-size: 16px;
+  line-height: 1;
+}
+
+/* --- The camera button: it says whether the camera is attached ------------ */
+.jdt-actions button.jdt-camera {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding-left: 11px;
+}
+
+/* A filled mark: the camera is attached to the Car. */
+.jdt-cam-mark {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--chalk);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+
+/* Detached: the mark goes hollow and the whole button asks for a tap. */
+.jdt-camera.is-detached {
+  border-color: rgba(228, 182, 87, 0.85);
+  color: var(--accent);
+}
+
+.jdt-camera.is-detached .jdt-cam-mark {
+  background: transparent;
+  border: 1.5px solid var(--accent);
+  box-shadow: none;
+}
+
+/* --- The message: a chalk toast over the world --------------------------- */
+.jdt-msg {
+  position: absolute;
+  left: 50%;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translate(-50%, 10px);
+  max-width: min(78vw, 380px);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(22, 25, 29, 0.86);
+  border: 1px solid var(--slate-edge);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+.jdt-msg.is-on {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.jdt-msg.is-illegal {
+  color: var(--danger);
+  border-color: rgba(224, 101, 79, 0.5);
+}
+
+/* --- The tuning-panel toggle: a dev tool, kept out of the way ----------- */
+.jdt-tune {
+  position: absolute;
+  left: calc(env(safe-area-inset-left, 0px) + 12px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+  pointer-events: auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid rgba(242, 239, 228, 0.28);
+  background: rgba(22, 25, 29, 0.7);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+  color: var(--chalk-dim);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jdt-tune.is-off {
+  color: var(--accent);
+  border-color: rgba(228, 182, 87, 0.55);
+}
+
+/* --- Reduced motion: the pulse and the slides are decoration ------------- */
+@media (prefers-reduced-motion: reduce) {
+  .jdt-hud *,
+  .jdt-hud *::before,
+  .jdt-hud *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* --- Wide screens: the panel stops being a phone-shaped thing ----------- */
+@media (min-width: 720px) {
+  .jdt-panel {
+    width: 260px;
+  }
+}

@@ -217,10 +217,20 @@ export class CameraRig {
     const dy = e.clientY - this.lastPointer.y;
     this.lastPointer.set(e.clientX, e.clientY);
     if (this.mouse.mode === 'orbit') {
-      // Same convention as two fingers: the view follows the pointer.
-      this.params.yaw += (this.params.invertRotate ? -dx : dx) * 0.006;
+      // The view follows the pointer: dragging right turns the world right.
+      //
+      // The sign was backwards. `yaw` grows when the camera orbits
+      // anticlockwise around the Car (seen from above), which turns the
+      // WORLD anticlockwise on screen — so dragging right used to send the
+      // world the other way. `invertRotate` still flips it for anyone who
+      // wants the old behaviour.
+      this.params.yaw += (this.params.invertRotate ? dx : -dx) * 0.006;
+      // Tilt is measured FROM VERTICAL: 0 is straight down, larger values
+      // lower the camera toward the horizon. Dragging DOWN should pull the
+      // view toward the top-down framing — the same way every 3D viewer
+      // orbits when you drag down — so the sign is negative.
       this.params.tilt = THREE.MathUtils.clamp(
-        this.params.tilt + dy * TILT_PER_PX,
+        this.params.tilt - dy * TILT_PER_PX,
         TILT_MIN,
         TILT_MAX,
       );
@@ -342,9 +352,20 @@ export class CameraRig {
       .applyAxisAngle(new THREE.Vector3(0, 1, 0), this.params.yaw);
   }
 
+  /**
+   * Frame a world point and STOP following a Car. The camera's own gestures
+   * keep working from here; this is only for looking at the world on purpose
+   * (and for the capture harness, which needs reproducible framings).
+   */
+  focusAt(point: THREE.Vector3): void {
+    this.params.following = false;
+    this.target.copy(point);
+    this.apply();
+  }
+
   /** Write the camera out right now — used by the wheel handler so that the
    *  ground point under the pointer is honest before we measure it again. */
-  private apply(): void {
+  apply(): void {
     this.game.camera.position.copy(this.target.clone().add(this.offset()));
     this.game.camera.lookAt(this.target);
   }

@@ -1,5 +1,12 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import {
+  asphaltTexture,
+  concreteRoughness,
+  concreteTexture,
+  glassTexture,
+  tilesTexture,
+} from './textures.js';
 
 /**
  * THROWAWAY PROTOTYPE CODE — Surfaces (ticket 16).
@@ -119,6 +126,14 @@ export function uniformAssignment(key: SurfaceKey): SquareAssignment {
  *
  * Materials are shared per Surface key, so repainting a square on a GUI swap
  * costs one assignment and no allocation.
+ *
+ * The old materials were flat colours with a 256px speckle spread over an
+ * 80-unit slab: one pixel covered 3 mm of concrete, so the "texture" was
+ * sub-pixel and the ground rendered as a flat colour field. The textures now
+ * are generated at a real texel density (`textures.ts`) and the geometry's
+ * UVs are scaled to world units (`worldUV` in `world.ts`), so a chip of
+ * aggregate is actually a chip of aggregate and the score joints land every
+ * 80 cm — which is what tells you the cars are tiny.
  */
 const materials = new Map<SurfaceKey, THREE.MeshStandardMaterial>();
 
@@ -133,15 +148,79 @@ export function surfaceMaterial(key: SurfaceKey): THREE.MeshStandardMaterial {
 function materialSpec(key: SurfaceKey): THREE.MeshStandardMaterialParameters {
   switch (key) {
     case 'asphalt':
-      return { color: 0x3f4245, roughness: 0.98, metalness: 0, map: speckleTexture(0.5) };
+      return {
+        color: 0xffffff,
+        map: asphaltTexture(),
+        roughnessMap: concreteRoughness(),
+        roughness: 0.95,
+        metalness: 0,
+      };
     case 'concrete':
-      return { color: 0x8f9189, roughness: 0.95, metalness: 0, map: speckleTexture(0.35) };
+      return {
+        color: 0xffffff,
+        map: concreteTexture(),
+        roughnessMap: concreteRoughness(),
+        roughness: 0.92,
+        metalness: 0,
+      };
     case 'tiles':
-      return { color: 0xc2a878, roughness: 0.6, metalness: 0, map: tileTexture() };
+      return {
+        color: 0xffffff,
+        map: tilesTexture(),
+        roughnessMap: concreteRoughness(),
+        roughness: 0.68,
+        metalness: 0,
+      };
     case 'glass':
-      // No texture: the point of glass is that nothing marks it.
-      return { color: 0x9fc6d8, roughness: 0.06, metalness: 0.12 };
+      // Framed panes: the frame is what you actually SEE of a glass roof,
+      // and it is what tells the player this Surface is glass.
+      //
+      // Roughness 0.22, not 0.05: at 0.05 the sheet was a perfect mirror
+      // and the square read as a lake, not as a surface you can push a Car
+      // across.
+      return {
+        color: 0xffffff,
+        map: glassTexture(),
+        roughness: 0.22,
+        metalness: 0.06,
+      };
   }
+}
+
+/**
+ * How many world units one texture tile covers (1 unit = 10 cm real).
+ *
+ * The geometry's UVs are scaled by this, so every piece of ground — the
+ * 80-unit apron, the 28-unit sample squares, the raised tile — shares ONE
+ * texel density and ONE set of score joints. A piece of ground whose texture
+ * did not line up with its neighbour would read as two different worlds
+ * meeting, which is exactly what the four Surfaces are NOT supposed to be.
+ */
+export const SURFACE_TILE_UNITS: Record<SurfaceKey, number> = {
+  asphalt: 6,
+  concrete: 8,
+  tiles: 4,
+  glass: 4,
+};
+
+/**
+ * The stones lying in a Surface. They get their OWN material rather than the
+ * Surface's map: a sphere's spherical UVs would smear the ground texture
+ * across each pebble, which reads as dirt on the lens.
+ */
+const stoneMaterials = new Map<SurfaceKey, THREE.MeshStandardMaterial>();
+
+export function stoneMaterial(key: SurfaceKey): THREE.MeshStandardMaterial {
+  const cached = stoneMaterials.get(key);
+  if (cached) return cached;
+  const base = SURFACES[key].color;
+  const mat = new THREE.MeshStandardMaterial({
+    color: base,
+    roughness: 0.86,
+    metalness: 0,
+  });
+  stoneMaterials.set(key, mat);
+  return mat;
 }
 
 /**
@@ -149,66 +228,6 @@ function materialSpec(key: SurfaceKey): THREE.MeshStandardMaterialParameters {
  * unit (10 cm real). Motion is readable against it (a flat colour hides
  * movement) and it reads as worn paving. Generated once per strength.
  */
-function speckleTexture(strength: number): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 256;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 256, 256);
-  for (let i = 0; i < 900; i++) {
-    const g = 150 + Math.floor(Math.random() * 105);
-    ctx.fillStyle = `rgba(${g},${g},${g},${(0.25 + Math.random() * 0.3) * strength})`;
-    const s = Math.random() < 0.9 ? 1 : 2;
-    ctx.fillRect(Math.random() * 256, Math.random() * 256, s, s);
-  }
-  for (let i = 0; i < 24; i++) {
-    const g = 200 + Math.floor(Math.random() * 40);
-    ctx.fillStyle = `rgba(${g},${g},${g},${0.12 * strength})`;
-    ctx.beginPath();
-    ctx.arc(Math.random() * 256, Math.random() * 256, 8 + Math.random() * 22, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(80, 80); // one tile per unit across the 80-unit slab
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
-
-/** Paving slabs: tiles with grout lines, 4 per world unit (25 cm real tiles). */
-function tileTexture(): THREE.Texture {
-  const c = document.createElement('canvas');
-  c.width = 256;
-  c.height = 256;
-  const ctx = c.getContext('2d')!;
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, 256, 256);
-  const step = 64; // 4 tiles per texture repeat
-  ctx.strokeStyle = 'rgba(90,75,55,0.55)';
-  ctx.lineWidth = 3;
-  for (let i = 0; i <= 256; i += step) {
-    ctx.beginPath();
-    ctx.moveTo(i, 0);
-    ctx.lineTo(i, 256);
-    ctx.moveTo(0, i);
-    ctx.lineTo(256, i);
-    ctx.stroke();
-  }
-  for (let i = 0; i < 200; i++) {
-    const g = 170 + Math.floor(Math.random() * 85);
-    ctx.fillStyle = `rgba(${g},${g},${g},0.18)`;
-    ctx.fillRect(Math.random() * 256, Math.random() * 256, 1 + Math.random() * 2, 1);
-  }
-  const tex = new THREE.CanvasTexture(c);
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  // One texture repeat covers 4 world units, so tiles are 2.5 cm real.
-  tex.repeat.set(20, 20);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.anisotropy = 4;
-  return tex;
-}
 
 /**
  * Membership group of the Surface pads — the things a wheel is STANDING ON.

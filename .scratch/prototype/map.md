@@ -316,6 +316,141 @@ Build notes (v0 slingshot slice + feel passes, 2026-10-05):
   here can see the screen. New `pnpm check:look` counts draw calls instead of
   trusting us: **36 drawable objects, 18 materials, one material for all chalk.**
 
+- Ticket 20 — **LOOK, second pass (2026-10-31, agent).** The first LOOK pass
+  fixed what was measurable (chalk width, tone mapping, an environment,
+  camera-relative haze). The second pass came after the user said "the visuals
+  you see now mean nothing — this is purely a functional prototype", and was
+  done against RENDERED FRAMES rather than assumptions. The direction packet is
+  `docs/visual-direction.md`; the implementation is `palette.ts`, `textures.ts`,
+  `chalk.ts`, `look.ts`. What the frames actually showed, and what it cost to
+  find:
+  - **Chalk was a VECTOR LINE, not chalk.** `Line2` had the right width but was
+    pure white and mathematically smooth. It is now a ribbon with grain, skips,
+    a pressure-varying width and a path wobble. The wobble lives in `Track.path`
+    — the rules read the same path the drawing does, so a mark can never
+    disagree with the rules by more than the chalk's own width.
+  - **The ground textures were SUB-PIXEL.** The old 256px canvas speckle was
+    stretched over an 80-unit slab: one pixel covered 3mm of concrete, so the
+    ground rendered as a flat colour field. Textures are now generated as
+    `DataTexture`s at a texel density specified in MILLIMETRES of real world,
+    and geometry UVs are scaled to world units (`worldUV`) so the apron and the
+    sample squares share one texel density. **LESSON (general): a texture's
+    size means nothing until you know the world size it is mapped onto.**
+  - **The chalk measured 1.87:1 against the concrete.** The Boundary lines ARE
+    the game information, so this was a real failure, not a taste question.
+    Repaired by moving the chalk up (near-white albedo + an emissive floor) and
+    the ground down. Now 4.1:1 on concrete, 7.3 on asphalt, 5.2 on tiles, 11.1
+    on glass — measured on rendered frames, not on swatches. **LESSON: measure
+    contrast on the RENDER. A swatch lies about a tone-mapped, textured,
+    moving background.**
+  - **The shadow map could not see a 1:64 car.** The frustum covered 46 units
+    with a 2048 map — 2.2cm per texel, for a car 4.5cm long. The frustum now
+    follows the camera's target and scales with camera distance, and every Car
+    also gets a soft contact smudge, which is what actually grounds it.
+  - **THE SKY WAS UPSIDE DOWN.** A `DataTexture`'s first row is the BOTTOM in
+    GL terms, so the blue zenith was below the horizon and the sky rendered as
+    a flat pale sheet. **LESSON: `DataTexture` does not flip. Write it upside
+    down on purpose, or set `flipY` and check.**
+  - **`scene.background` is NOT tone-mapped by three.js, but fog IS.** A
+    background sky therefore cannot meet a tone-mapped fog — there was a hard
+    grey seam across the middle of the screen. The sky is now a DOME MESH in
+    the scene, and the fog colour IS the sky's horizon colour, so the horizon
+    has no seam by construction.
+  - **The ground had no edge** (an 80-unit slab ended in a razor horizon). A
+    1600-unit sheet of the same pavement sits a hair below it, and the haze
+    takes it from there.
+  - **Cars were boxes and four black cylinders** — at 1:64 a box has no
+    silhouette. They are now built from primitives with a glasshouse, a painted
+    roof, a racing stripe, bumpers, lamps, rubber tyres and metal hubs, merged
+    into four draw calls per Car.
+  - **The HUD was default browser chrome**, eating 28% of a phone screen. It is
+    now CHALK ON SLATE — the game's own material turned into a panel — with the
+    three Pushes shown as three chalk pips, because the rule IS three Pushes per
+    Turn. The tuning panel got a small ⚙ toggle, because it is a developer tool
+    and not the game.
+  - **Nothing in the physics moved.** All 31 headless checks still pass, and
+    `check:look` reports 36 drawable objects, 9 materials, and all 13 chalk
+    pieces sharing ONE material.
+  - Every look number is still in the GUI, because the user owns the numbers.
+    These are defaults, not opinions.
+
+- Ticket 20 — **LOOK, detail pass (2026-10-31, agent, from user feedback).**
+  Three things the frames and the player caught that the first pass missed:
+  - **The chalk had PERFECT WIDTH ALL THE TIME.** The variation was a pair of
+    sine waves at ±8 %, which reads as a printed stripe. And the texture's grain
+    cannot fix it: the chalk texture is 256px per world unit, so at the default
+    framing it is sub-pixel and averages out. The width variation now lives in
+    the GEOMETRY, in world space, where it survives at any zoom — pressure drifts
+    in world space AND a few times along each stroke, the two edges wander
+    independently (a stick at an angle does not leave parallel edges), and open
+    strokes taper at both ends where the stick lifts off the concrete.
+    **LESSON: if an imperfection has to read at the game's normal zoom, it cannot
+    live in the texture — put it in the geometry.**
+  - **Fixing that exposed a real bug:** the closed-ribbon sampler built its
+    arc-length table WITHOUT the closing segment, so the last stretch of every
+    closed mark collapsed onto the final point. The Track's boundaries had a
+    dead zone at the seam. Found while making the width vary, not before.
+  - **Desktop Shift+drag rotated the camera the wrong way.** `yaw` grows when
+    the camera orbits anticlockwise seen from above, and that turns the WORLD
+    anticlockwise — so dragging right sent the world the other way. The view
+    now follows the pointer. Up/down was already right and was left alone.
+    **NOTE: the two-finger twist on touch still turns the world the other way.**
+    It was not reported, the player has a phone, and it is a one-line change
+    when they want it.
+  - **The Camera button came back, labelled and stateful.** Following is a MODE
+    that any two-finger gesture ends, so the player has to be able to see which
+    mode they are in and get back without hunting: the button reads "Camera"
+    with a filled mark when attached, and "Follow Car" in the accent colour
+    when detached. The HUD is TOLD the state (the camera can be detached by a
+    gesture nobody is looking at) rather than asked.
+
+- Ticket 20 — **LOOK, chalk pass (2026-10-31, agent, from user feedback).**
+  The player said the chalk "is still not convincing as it has perfect width
+  all the time", then "it should be rougher... the real good stuff is visible
+  when zoom in too much", then "there is like a lot of thin strings along the
+  line... this noise should not be along the line but more in both directions.
+  I think simple TV no signal noise would be perfect". Three rounds, and the
+  agent's first answer was WRONG — the lessons are worth more than the code:
+  - **The agent claimed the texture's grain was "sub-pixel and averages out" at
+    the default zoom. MEASURED, it was not:** the chalk core's grain measured
+    sd 3.0–4.9 luma (~2 %) at the hero framing — the SAME as at close-up
+    framing, because the texture is 256 texels per world unit and the hero
+    view is ~266 px per unit, i.e. roughly 1:1. The grain was never
+    sub-pixel; it was just too WEAK, and the texture's EDGE was perfectly
+    smooth while all the imperfection sat in the geometry. **LESSON: measure
+    the claim before defending it. The player was right.**
+  - **A texture mapped onto a thin strip needs to be ANISOTROPIC.** A chalk
+    mark is a 7 mm band running for metres; on screen that is ~26 px across
+    and thousands of px long. A square texture is minified ~20x ACROSS the band
+    (the edge blurs to mush) while magnified along it. The chalk texture is now
+    32 wide and 2048 tall, one tile covering 60 cm of mark.
+  - **The two axes must have the SAME physical texel size or the noise is not
+    noise.** With 0.1 mm across and 0.6 mm along, per-texel noise became *thin
+    strings running along the line* — exactly what the player saw. Matched at
+    ~0.25 mm, it is the "TV no signal" the mark wants to be.
+  - **A noise lattice finer than ~4 texels shows as a COMB.** Value noise
+    interpolates linearly between lattice points, so at 2–3 texels per cell
+    the interpolation itself becomes a visible triangle wave — the chalk came
+    out looking like a venetian blind. Rule the textures follow now: smooth
+    things use cells of 8+ texels and two octaves; fine things are per-texel
+    white noise, which has no lattice to show.
+  - **`Math.sin(i*127.1 + j*311.7)` is NOT a hash at these indices.** Multiplied
+    up for per-texel noise, adjacent texels land ~0.16 of a cycle apart, so
+    "white" noise developed a beat every six or seven texels. Replaced with a
+    real xorshift-multiply integer hash.
+  - **The hole threshold sat ON the mean of its distribution**, so half the
+    mark was punched out in 4 mm dashes and the chalk read as a dotted line.
+  - **The slow "puff" mottle was banding**: ten broad bands per 10 cm repeat,
+    visible as banding along a 90 cm boundary line. Removed.
+  - **The closed-ribbon sampler built its arc-length table WITHOUT the closing
+    segment**, so the last stretch of every closed mark collapsed onto the
+    final point. Found while making the width vary, not before.
+  - **LESSON (general, and the one to keep): a texture's size means nothing
+    until you know the world size it is mapped onto AND the screen size that
+    world appears at.** The chalk went through four rounds of "looks wrong"
+    before that was pinned down, and every round was a different mismatch
+    between those two numbers.
+
 - Ticket 18 is **PLAYABLE**: `pnpm dev` → GUI → Control scheme (A / C) → Flick.
   Tunables exposed live (maxAccel = strength, finger mass, penetration budget,
   knuckle dimensions), strike marked for 2 s, and `pnpm check:flick` guards the

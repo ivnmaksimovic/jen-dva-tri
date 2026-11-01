@@ -28,6 +28,14 @@ export interface Hud {
   /** What each wheel is standing on, per wheel, in order (ticket 16 readout). */
   setWheelSurfaces(reads: { label: string; color: number }[]): void;
   /**
+   * Whether the camera is currently attached to the Car.
+   *
+   * Following is a MODE, and it ends the moment the player takes the camera
+   * (ticket 19). The player needs to know which mode they are in without
+   * inferring it, and they need a way BACK — so the camera button says so.
+   */
+  setCameraFollowing(following: boolean): void;
+  /**
    * The last strike's contact readout (ticket 18): how long the finger stayed
    * on the Car and whether that overran the legal window. Display only —
    * riding is illegal, not prevented.

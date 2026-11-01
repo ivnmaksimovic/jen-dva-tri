@@ -1,10 +1,13 @@
 import * as THREE from 'three';
-import { Line2 } from 'three/examples/jsm/lines/Line2.js';
-import { LineGeometry } from 'three/examples/jsm/lines/LineGeometry.js';
-import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
-import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
-import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
 import { terrainY } from './world.js';
+import {
+  CHALK_LIFT,
+  chalkFillGeometry,
+  chalkMaterial,
+  ribbonGeometry,
+  segmentRibbon,
+  wobblePath,
+} from './chalk.js';
 
 /**
  * THROWAWAY PROTOTYPE CODE — chalk Track: a rounded-rect loop 26×22 units
@@ -14,6 +17,14 @@ import { terrainY } from './world.js';
  * Chalk used to be `LineBasicMaterial`, which is one PIXEL wide however far you
  * zoom: a hairline, not chalk. Lines here are `Line2` in `worldUnits`, so the
  * band has the same real width at any zoom (ticket 20).
+ *
+ * Ticket 20's `Line2` bands were the right WIDTH but still vector art: pure
+ * white, mathematically smooth. They are now ribbons with chalk grain, a
+ * hand's wobble in the path, and a width that breathes along the mark.
+ *
+ * IMPORTANT: the wobble is applied to `this.path` itself, so the RULES and the
+ * DRAWING read the same line. A mark that disagreed with the rules by more
+ * than the chalk's own width would be a bug, not a texture.
  */
 
 export interface Vec2 {
@@ -32,35 +43,15 @@ export interface PathPoint {
 }
 
 export const TRACK_HALF_WIDTH = 1.5; // chalk lines 1.5 units from centerline
+/**
+ * The RULE half-width of a Boundary: how far past the chalk a wheel must be
+ * before it counts as Out of Track. Deliberately separate from the chalk's
+ * drawn width — the mark can be repainted without changing the rules.
+ */
 export const CHALK_WIDTH = 0.05; // ~5 mm real chalk line width
 
-/**
- * One material for all chalk: width in WORLD units, so zooming changes nothing
- * about how thick the line is on the ground. Alpha-to-coverage gives the edges
- * some bite without sorting problems.
- */
-const chalkMat = new LineMaterial({
-  color: new THREE.Color('#f4f4ee').getHex(),
-  linewidth: CHALK_WIDTH,
-  worldUnits: true,
-  transparent: true,
-  opacity: 0.95,
-  alphaToCoverage: true,
-  depthWrite: false,
-});
-
-/**
- * `LineMaterial` needs the drawing buffer size to rasterise; without this the
- * lines are wrong (or invisible) depending on the device pixel ratio.
- */
-export function setChalkResolution(width: number, height: number): void {
-  chalkMat.resolution.set(width, height);
-}
-
-/** Change chalk thickness live (tunable: nobody knows the right number yet). */
-export function setChalkWidth(units: number): void {
-  chalkMat.linewidth = Math.max(0.001, units);
-}
+/** How wide the chalk is DRAWN, world units (half-width of the band). */
+const CHALK_HALF_WIDTH = 0.035;
 
 function roundedRectPath(): Vec2[] {
   // Rectangle x∈[0,26] z∈[0,22], corner radius 6, sampled every ~6°.
@@ -97,28 +88,43 @@ function offsetPolyline(pts: Vec2[], d: number): Vec2[] {
   });
 }
 
-function chalkLine(points: THREE.Vector3[]): Line2 {
-  const geom = new LineGeometry();
-  const flat: number[] = [];
-  for (const p of points) flat.push(p.x, p.y, p.z);
-  geom.setPositions(flat);
-  const line = new Line2(geom, chalkMat);
-  // A wide band needs correct bounds or it disappears when its centre goes
-  // off-screen while part of it is still in view.
-  line.computeLineDistances();
-  line.frustumCulled = false;
-  return line;
-}
-
-/** Segment soup (Lake hatching, Bridge diagonals) — the same width, in units. */
-function chalkSegments(points: THREE.Vector3[]): LineSegments2 {
-  const geom = new LineSegmentsGeometry();
-  const flat: number[] = [];
-  for (const p of points) flat.push(p.x, p.y, p.z);
-  geom.setPositions(flat);
-  const segs = new LineSegments2(geom, chalkMat);
-  segs.frustumCulled = false;
-  return segs;
+/**
+ * A stroke drawn ACROSS the track.
+ *
+ * A checkpoint line is two points and a straight line between them — which
+ * is exactly what a renderer draws and exactly what a hand does not. This
+ * subdivides the stroke and lets it wander a little, the same way the
+ * boundary line's path does.
+ */
+function drawnStroke(
+  a: THREE.Vector3,
+  b: THREE.Vector3,
+  wobble: number,
+  seed: number,
+): THREE.Vector3[] {
+  const dir = b.clone().sub(a);
+  const len = dir.length();
+  if (len < 1e-6) return [a, b];
+  const nx = -dir.z / len;
+  const nz = dir.x / len;
+  const n = 14;
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= n; i++) {
+    const u = i / n;
+    // A single lazy S, plus a little noise: the line drifts off true and
+    // comes back, the way a wrist does it.
+    const off =
+      (Math.sin(u * Math.PI * 1.6 + seed) * 0.7 + Math.sin(u * Math.PI * 4.3 + seed * 2.1) * 0.3) *
+      wobble;
+    pts.push(
+      new THREE.Vector3(
+        a.x + dir.x * u + nx * off,
+        a.y + (b.y - a.y) * u,
+        a.z + dir.z * u + nz * off,
+      ),
+    );
+  }
+  return pts;
 }
 
 export class Track {
@@ -130,6 +136,9 @@ export class Track {
   private readonly cum: number[] = [];
   /** Checkpoint arc lengths, sorted ascending, starting with the start line (s=0). */
   readonly checkpointS: number[] = [];
+
+  /** Half-width of the drawn chalk band, world units. */
+  private chalkHalf = CHALK_HALF_WIDTH;
 
   // Hazard geometry (flat chalk drawings — rules, not colliders):
   readonly rock: Vec2[] = [
@@ -147,7 +156,10 @@ export class Track {
   readonly bridge = { x1: 10.4, x2: 11.9, z1: 20.5, z2: 23.5 };
 
   constructor(scene: THREE.Scene) {
-    this.path = roundedRectPath();
+    // The hand's wobble lives in the PATH, so the rules and the drawing
+    // cannot disagree. 1.5 mm of wander is visible up close and invisible to
+    // the rules.
+    this.path = wobblePath(roundedRectPath(), 0.015, 0.35);
     let s = 0;
     for (let i = 0; i < this.path.length; i++) {
       this.cum.push(s);
@@ -169,11 +181,41 @@ export class Track {
     scene.add(this.chalk);
   }
 
+  /** Repaint the chalk at a new width (a GUI knob). Cheap: ~13 small meshes. */
+  setChalkWidth(halfWidth: number): void {
+    if (Math.abs(halfWidth - this.chalkHalf) < 1e-4) return;
+    this.chalkHalf = halfWidth;
+    for (const child of [...this.chalk.children]) {
+      this.chalk.remove(child);
+      const mesh = child as THREE.Mesh;
+      mesh.geometry?.dispose();
+    }
+    this.drawChalk();
+  }
+
   private drawChalk(): void {
-    const lift = 0.012; // above the concrete to avoid z-fighting
+    const lift = CHALK_LIFT; // above the concrete to avoid z-fighting
+    const hw = this.chalkHalf;
+    const mat = chalkMaterial();
+
+    const addRibbon = (
+      pts: THREE.Vector3[],
+      closed = false,
+      pressure = 0.4,
+      seed = 0,
+    ): THREE.Mesh => {
+      const mesh = new THREE.Mesh(
+        ribbonGeometry(pts, { halfWidth: hw, closed, pressure, seed }),
+        mat,
+      );
+      mesh.receiveShadow = true;
+      mesh.renderOrder = 1;
+      this.chalk.add(mesh);
+      return mesh;
+    };
 
     // Boundary lines, following terrain height (sidewalk/ramps).
-    for (const side of [-TRACK_HALF_WIDTH, TRACK_HALF_WIDTH]) {
+    for (const [side, seed] of [[-TRACK_HALF_WIDTH, 1], [TRACK_HALF_WIDTH, 2]] as const) {
       const off = offsetPolyline(this.path, side);
       // Sampled finely so the sidewalk/ramp height profile is followed.
       const pts: THREE.Vector3[] = [];
@@ -188,45 +230,56 @@ export class Track {
           pts.push(new THREE.Vector3(x, terrainY(x, z) + lift, z));
         }
       }
-      this.chalk.add(chalkLine(pts));
+      addRibbon(pts, true, 0.42, seed);
     }
 
     // Checkpoints: lines across the track (perpendicular to the path).
-    for (const cs of this.checkpointS) {
+    this.checkpointS.forEach((cs, i) => {
       const p = this.pointAt(cs);
       const px = -p.dz;
       const pz = p.dx; // left normal
-      this.chalk.add(chalkLine([
+      addRibbon(
+        drawnStroke(
           new THREE.Vector3(p.x + px * TRACK_HALF_WIDTH, p.y + lift, p.z + pz * TRACK_HALF_WIDTH),
           new THREE.Vector3(p.x - px * TRACK_HALF_WIDTH, p.y + lift, p.z - pz * TRACK_HALF_WIDTH),
-        ]),
+          0.014,
+          i,
+        ),
+        false,
+        0.45,
+        10 + i,
       );
-    }
+    });
 
     // Start/finish: double line just behind the start checkpoint.
     {
-      for (const q of [this.pointAt(this.length - 0.15), this.pointAt(this.length - 0.3)]) {
+      const lines = [this.pointAt(this.length - 0.15), this.pointAt(this.length - 0.3)];
+      lines.forEach((q, i) => {
         const px = -q.dz;
         const pz = q.dx;
-        this.chalk.add(chalkLine([
+        addRibbon(
+          drawnStroke(
             new THREE.Vector3(q.x + px * TRACK_HALF_WIDTH, q.y + lift, q.z + pz * TRACK_HALF_WIDTH),
             new THREE.Vector3(q.x - px * TRACK_HALF_WIDTH, q.y + lift, q.z - pz * TRACK_HALF_WIDTH),
-          ]),
+            0.012,
+            20 + i,
+          ),
+          false,
+          0.45,
+          20 + i,
         );
-      }
+      });
     }
 
-    // Rock: filled solid white triangle (chalk paint, not a collider).
+    // Rock: a chalk triangle — a rim and a scribbled inside, both the same
+    // stroke as every other chalk line (not a flat white polygon).
     {
-      const shape = new THREE.Shape(
-        this.rock.map((v) => new THREE.Vector2(v.x, -v.z)),
-      );
+      const outline = this.rock.map((v) => new THREE.Vector3(v.x, lift, v.z));
       const mesh = new THREE.Mesh(
-        new THREE.ShapeGeometry(shape),
-        new THREE.MeshBasicMaterial({ color: '#f4f4ee' }),
+        chalkFillGeometry(outline, hw, { pressure: 0.42, seed: 61 }),
+        mat,
       );
-      mesh.rotation.x = -Math.PI / 2;
-      mesh.position.set(0, lift, 0);
+      mesh.renderOrder = 1;
       this.chalk.add(mesh);
     }
 
@@ -237,12 +290,14 @@ export class Track {
       const outline: THREE.Vector3[] = [];
       for (let i = 0; i <= 64; i++) {
         const a = (i / 64) * Math.PI * 2;
+        // Not a perfect ellipse: nobody draws one with a stick.
+        const wob = 1 + Math.sin(a * 3.1 + 0.7) * 0.035 + Math.sin(a * 5.7 + 2.2) * 0.022;
         outline.push(
-          new THREE.Vector3(cx + rx * Math.cos(a), y, cz + rz * Math.sin(a)),
+          new THREE.Vector3(cx + rx * Math.cos(a) * wob, y, cz + rz * Math.sin(a) * wob),
         );
       }
-      this.chalk.add(chalkLine(outline));
-      const hatched: THREE.Vector3[] = [];
+      addRibbon(outline, true, 0.4, 31);
+      const hatched: [THREE.Vector3, THREE.Vector3][] = [];
       const SQ2 = Math.SQRT1_2;
       for (let c = -(rx + rz); c <= rx + rz; c += 0.45) {
         // Line {p : p·n = c}, n=(1,-1)/√2, along d=(1,1)/√2, clipped to the ellipse.
@@ -256,40 +311,56 @@ export class Track {
         const t = Math.sqrt(disc);
         for (const sign of [-1, 1]) {
           const tt = (-B + sign * t) / (2 * A);
-          hatched.push(new THREE.Vector3(cx + nx + SQ2 * tt, y, cz + nz + SQ2 * tt));
+          hatched.push([
+            new THREE.Vector3(cx + nx + SQ2 * tt, y, cz + nz + SQ2 * tt),
+            new THREE.Vector3(cx + nx - SQ2 * tt, y, cz + nz - SQ2 * tt),
+          ]);
         }
       }
-      this.chalk.add(chalkSegments(hatched));
+      const mesh = new THREE.Mesh(segmentRibbon(hatched, hw * 0.8, 1 / 6, 0.7, 41), mat);
+      mesh.renderOrder = 1;
+      this.chalk.add(mesh);
     }
 
     // Bridge: rectangle outline + diagonals in BOTH directions, on the sidewalk.
     {
       const { x1, x2, z1, z2 } = this.bridge;
       const y = terrainY((x1 + x2) / 2, (z1 + z2) / 2) + lift;
-      this.chalk.add(chalkLine([
+      addRibbon(
+        [
           new THREE.Vector3(x1, y, z1),
           new THREE.Vector3(x2, y, z1),
           new THREE.Vector3(x2, y, z2),
           new THREE.Vector3(x1, y, z2),
           new THREE.Vector3(x1, y, z1),
-        ]),
+        ],
+        false,
+        0.3,
       );
-      const segs: THREE.Vector3[] = [];
+      const segs: [THREE.Vector3, THREE.Vector3][] = [];
       for (let c = x1 - z2; c <= x2 - z1; c += 0.4) {
         // line x = z + c, clipped to the rect
         const za = Math.max(z1, x1 - c);
         const zb = Math.min(z2, x2 - c);
         if (za < zb) {
-          segs.push(new THREE.Vector3(za + c, y, za), new THREE.Vector3(zb + c, y, zb));
+          segs.push([
+            new THREE.Vector3(za + c, y, za),
+            new THREE.Vector3(zb + c, y, zb),
+          ]);
         }
         // line x = -z + c
         const zc = Math.max(z1, c - x2);
         const zd = Math.min(z2, c - x1);
         if (zc < zd) {
-          segs.push(new THREE.Vector3(c - zc, y, zc), new THREE.Vector3(c - zd, y, zd));
+          segs.push([
+            new THREE.Vector3(c - zc, y, zc),
+            new THREE.Vector3(c - zd, y, zd),
+          ]);
         }
       }
-      this.chalk.add(chalkSegments(segs));
+      const mesh = new THREE.Mesh(segmentRibbon(segs, hw * 0.8, 1 / 6, 0.7, 51), mat);
+      mesh.renderOrder = 1;
+      this.chalk.add(mesh);
     }
   }
 
