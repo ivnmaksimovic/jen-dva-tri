@@ -1,7 +1,7 @@
 # 21: Make the flick playable with a mouse (desktop)
 
 Type: task
-Status: claimed
+Status: resolved
 Blocked by: (none)
 
 The flick (C) became the default scheme, and the user's first report from the
